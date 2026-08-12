@@ -1,0 +1,214 @@
+/** RGBA color, each channel 0-255. */
+export type RGBA = [number, number, number, number];
+
+export const TRANSPARENT: RGBA = [0, 0, 0, 0];
+
+/**
+ * A pixel document: a flat RGBA buffer plus the geometry to address it.
+ * This is the single source of truth; the on-screen canvas is only a view of it.
+ */
+export class PixelDoc {
+  readonly width: number;
+  readonly height: number;
+  data: Uint8ClampedArray;
+
+  constructor(width: number, height: number, data?: Uint8ClampedArray) {
+    this.width = width;
+    this.height = height;
+    this.data = data ?? new Uint8ClampedArray(width * height * 4);
+  }
+
+  contains(x: number, y: number): boolean {
+    return x >= 0 && y >= 0 && x < this.width && y < this.height;
+  }
+
+  get(x: number, y: number): RGBA {
+    const i = (y * this.width + x) * 4;
+    const d = this.data;
+    return [d[i], d[i + 1], d[i + 2], d[i + 3]];
+  }
+
+  set(x: number, y: number, color: RGBA): void {
+    if (!this.contains(x, y)) return;
+    const i = (y * this.width + x) * 4;
+    this.data[i] = color[0];
+    this.data[i + 1] = color[1];
+    this.data[i + 2] = color[2];
+    this.data[i + 3] = color[3];
+  }
+
+  clear(): void {
+    this.data.fill(0);
+  }
+
+  snapshot(): Uint8ClampedArray {
+    return this.data.slice();
+  }
+
+  restore(snapshot: Uint8ClampedArray): void {
+    this.data.set(snapshot);
+  }
+}
+
+export function sameColor(a: RGBA, b: RGBA): boolean {
+  // Fully transparent pixels are equal regardless of their stale RGB channels.
+  if (a[3] === 0 && b[3] === 0) return true;
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[3] === b[3];
+}
+
+/** Bresenham line, so a fast drag paints a continuous stroke instead of dots. */
+export function linePoints(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Array<[number, number]> {
+  const points: Array<[number, number]> = [];
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  let x = x0;
+  let y = y0;
+
+  for (;;) {
+    points.push([x, y]);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+  return points;
+}
+
+const CHECKER_LIGHT = '#3a3a42';
+const CHECKER_DARK = '#31313a';
+const CHECKER_SIZE = 8; // screen pixels
+
+export interface RenderOptions {
+  zoom: number;
+  showGrid: boolean;
+  /** CSS color painted behind the art, or null to keep it transparent. */
+  background: string | null;
+}
+
+/**
+ * Paints the document into a display canvas at `zoom` screen-pixels per art-pixel,
+ * over a transparency checkerboard, with an optional pixel grid on top.
+ */
+export class Renderer {
+  private readonly ctx: CanvasRenderingContext2D;
+  private readonly scratch: HTMLCanvasElement;
+  private readonly scratchCtx: CanvasRenderingContext2D;
+
+  constructor(private readonly canvas: HTMLCanvasElement) {
+    this.ctx = require2d(canvas);
+    this.scratch = document.createElement('canvas');
+    this.scratchCtx = require2d(this.scratch);
+  }
+
+  render(doc: PixelDoc, { zoom, showGrid, background }: RenderOptions): void {
+    const w = doc.width * zoom;
+    const h = doc.height * zoom;
+
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+
+    // The checkerboard stands in for "no background"; a solid color replaces it.
+    if (background === null) {
+      this.drawCheckerboard(w, h);
+    } else {
+      this.ctx.fillStyle = background;
+      this.ctx.fillRect(0, 0, w, h);
+    }
+    this.drawPixels(doc, w, h);
+    if (showGrid && zoom >= 6) this.drawGrid(doc, zoom, w, h);
+  }
+
+  private drawCheckerboard(w: number, h: number): void {
+    const ctx = this.ctx;
+    ctx.fillStyle = CHECKER_DARK;
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = CHECKER_LIGHT;
+    for (let y = 0; y < h; y += CHECKER_SIZE) {
+      for (let x = (y / CHECKER_SIZE) % 2 ? CHECKER_SIZE : 0; x < w; x += CHECKER_SIZE * 2) {
+        ctx.fillRect(x, y, CHECKER_SIZE, CHECKER_SIZE);
+      }
+    }
+  }
+
+  private drawPixels(doc: PixelDoc, w: number, h: number): void {
+    // Blit the document at 1:1 into a scratch canvas, then scale it up with
+    // smoothing off — far cheaper than filling one rect per pixel.
+    if (this.scratch.width !== doc.width || this.scratch.height !== doc.height) {
+      this.scratch.width = doc.width;
+      this.scratch.height = doc.height;
+    }
+    const image = new ImageData(doc.data.slice(), doc.width, doc.height);
+    this.scratchCtx.putImageData(image, 0, 0);
+
+    this.ctx.imageSmoothingEnabled = false;
+    this.ctx.drawImage(this.scratch, 0, 0, w, h);
+  }
+
+  private drawGrid(doc: PixelDoc, zoom: number, w: number, h: number): void {
+    const ctx = this.ctx;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 1; x < doc.width; x++) {
+      ctx.moveTo(x * zoom + 0.5, 0);
+      ctx.lineTo(x * zoom + 0.5, h);
+    }
+    for (let y = 1; y < doc.height; y++) {
+      ctx.moveTo(0, y * zoom + 0.5);
+      ctx.lineTo(w, y * zoom + 0.5);
+    }
+    ctx.stroke();
+  }
+}
+
+/**
+ * Renders the document to a PNG blob, scaled up with nearest-neighbor.
+ * A null background leaves untouched pixels transparent in the exported file.
+ */
+export function toPngBlob(
+  doc: PixelDoc,
+  scale: number,
+  background: string | null = null,
+): Promise<Blob> {
+  const source = document.createElement('canvas');
+  source.width = doc.width;
+  source.height = doc.height;
+  require2d(source).putImageData(new ImageData(doc.data.slice(), doc.width, doc.height), 0, 0);
+
+  const out = document.createElement('canvas');
+  out.width = doc.width * scale;
+  out.height = doc.height * scale;
+  const ctx = require2d(out);
+  if (background !== null) {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, out.width, out.height);
+  }
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, 0, 0, out.width, out.height);
+
+  return new Promise((resolve, reject) => {
+    out.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('PNG encoding failed'))), 'image/png');
+  });
+}
+
+function require2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('2D canvas context unavailable');
+  return ctx;
+}

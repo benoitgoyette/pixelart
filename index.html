@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pixel Art Editor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <h1>pixelart</h1>
+        <div class="spacer"></div>
+        <button id="undo" title="Undo (⌘Z)">Undo</button>
+        <button id="redo" title="Redo (⇧⌘Z)">Redo</button>
+        <button id="clear">Clear</button>
+        <label class="field">
+          Export
+          <select id="export-scale">
+            <option value="1">1×</option>
+            <option value="4">4×</option>
+            <option value="8" selected>8×</option>
+            <option value="16">16×</option>
+          </select>
+        </label>
+        <button id="export" class="primary">Save PNG</button>
+      </header>
+
+      <div class="body">
+        <aside class="sidebar">
+          <section>
+            <h2>Tools</h2>
+            <div class="tools" id="tools"></div>
+            <label class="field brush-field" id="pencil-size-field">
+              Pencil / shape size
+              <select id="pencil-size"></select>
+            </label>
+            <label class="field brush-field" id="eraser-size-field" hidden>
+              Eraser size
+              <select id="eraser-size"></select>
+            </label>
+          </section>
+
+          <section>
+            <h2>Color</h2>
+            <div class="swatch-row">
+              <div class="current-swatch" id="current-swatch"></div>
+              <input type="color" id="color-input" value="#e5484d" />
+            </div>
+            <div class="palette" id="palette"></div>
+          </section>
+
+          <section id="shape-section" hidden>
+            <h2>Shape fill</h2>
+            <div class="field" id="shape-fill-field">
+              <label for="shape-fill">Fill</label>
+              <div class="bg-row">
+                <select id="shape-fill">
+                  <option value="none" selected>None (outline)</option>
+                  <option value="brush">Brush color</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <input type="color" id="shape-fill-color" value="#ffcd75" hidden />
+              </div>
+              <div class="palette fill-palette" id="shape-fill-palette" hidden></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Canvas</h2>
+            <label class="field">
+              Size
+              <select id="doc-size">
+                <option value="16">16 × 16</option>
+                <option value="32" selected>32 × 32</option>
+                <option value="64">64 × 64</option>
+                <option value="128">128 × 128</option>
+              </select>
+            </label>
+            <label class="field">
+              Background
+              <div class="bg-row">
+                <select id="background">
+                  <option value="transparent" selected>Transparent</option>
+                  <option value="#ffffff">White</option>
+                  <option value="#000000">Black</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <input type="color" id="background-color" value="#ffffff" hidden />
+              </div>
+            </label>
+            <label class="field checkbox">
+              <input type="checkbox" id="show-grid" checked />
+              Show grid
+            </label>
+            <label class="field">
+              Zoom <span class="zoom-value" id="zoom-value">12×</span>
+              <input type="range" id="zoom" min="1" max="32" value="12" />
+            </label>
+          </section>
+        </aside>
+
+        <main class="stage" id="stage">
+          <canvas id="canvas"></canvas>
+        </main>
+      </div>
+
+      <footer class="statusbar">
+        <span id="status">ready</span>
+      </footer>
+    </div>
+
+    <dialog id="save-dialog" class="save-dialog">
+      <form method="dialog">
+        <h2>Save PNG</h2>
+        <label class="field" for="save-name">File name</label>
+        <div class="filename-row">
+          <input type="text" id="save-name" autocomplete="off" spellcheck="false" required />
+          <span class="extension">.png</span>
+        </div>
+        <p class="hint" id="save-hint"></p>
+        <div class="dialog-actions">
+          <button type="button" id="save-cancel">Cancel</button>
+          <button type="submit" id="save-confirm" class="primary" value="save">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

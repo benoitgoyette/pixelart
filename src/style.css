@@ -1,0 +1,358 @@
+:root {
+  --bg: #16161a;
+  --panel: #1e1e24;
+  --panel-raised: #26262e;
+  --border: #33333d;
+  --text: #e8e8ec;
+  --text-dim: #9a9aa6;
+  --accent: #41a6f6;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* topbar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.spacer {
+  flex: 1;
+}
+
+button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #4a4a58;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0a1622;
+  font-weight: 600;
+}
+
+/* layout */
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar section + section {
+  margin-top: 24px;
+}
+
+.sidebar h2 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.stage {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 32px;
+}
+
+#canvas {
+  cursor: crosshair;
+  image-rendering: pixelated;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+}
+
+/* tools */
+
+.tools {
+  display: grid;
+  gap: 6px;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.tool.active {
+  border-color: var(--accent);
+  background: rgba(65, 166, 246, 0.14);
+}
+
+.brush-field {
+  margin-top: 12px;
+  margin-bottom: 0;
+  transition: opacity 0.15s ease;
+}
+
+.brush-field.muted {
+  opacity: 0.45;
+}
+
+.tool-icon {
+  width: 18px;
+  text-align: center;
+}
+
+/* color */
+
+.swatch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.current-swatch {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+input[type="color"] {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  cursor: pointer;
+}
+
+.bg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.bg-row select {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.bg-row input[type="color"] {
+  flex-shrink: 0;
+}
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.swatch {
+  aspect-ratio: 1;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+}
+
+.swatch.selected {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.fill-palette {
+  margin-top: 8px;
+}
+
+.fill-palette[hidden] {
+  display: none;
+}
+
+/* fields */
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* display:block above would otherwise beat the UA rule for [hidden]. */
+.field[hidden] {
+  display: none;
+}
+
+.topbar .field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+/* Fields that wrap their own <label> rather than being one. */
+.field > label {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.field.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field select,
+.field input[type="range"] {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.topbar .field select {
+  width: auto;
+  margin: 0;
+}
+
+select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.zoom-value {
+  color: var(--text);
+}
+
+/* save dialog */
+
+.save-dialog {
+  width: min(380px, calc(100vw - 32px));
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+.save-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.save-dialog h2 {
+  margin: 0 0 16px;
+  font-size: 15px;
+}
+
+.save-dialog .field {
+  margin-bottom: 4px;
+}
+
+.filename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filename-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.filename-row input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.extension {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* statusbar */
+
+.statusbar {
+  padding: 6px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-dim);
+}
