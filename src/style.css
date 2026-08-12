@@ -54,6 +54,21 @@ body {
   flex: 1;
 }
 
+.project-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
 button {
   padding: 6px 12px;
   border: 1px solid var(--border);
@@ -485,6 +500,67 @@ select {
 
 .hint {
   margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* library dialog */
+
+.library-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-raised);
+}
+
+.library-row.current {
+  border-color: var(--accent);
+}
+
+.library-thumb {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  image-rendering: pixelated;
+  background-color: #31313a;
+  background-image:
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%),
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
+}
+
+.library-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.library-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-detail {
   font-size: 12px;
   color: var(--text-dim);
 }

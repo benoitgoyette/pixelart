@@ -47,7 +47,18 @@ eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
 - Transparent by default, with an optional solid background for preview and export.
 - PNG export of the current frame at 1× / 4× / 8× / 16× with nearest-neighbor
   scaling and a filename prompt.
-- Frames and settings auto-save to `localStorage`.
+
+**Saving** — work is kept in `localStorage`, in two separate places.
+
+- The current drawing autosaves continuously, so a reload picks up where you left
+  off whether or not you ever save by name.
+- **Save** (`⌘S`) stores the animation under a name; **Open…** lists everything
+  saved with a thumbnail, frame count, size, and date, to load or delete. Several
+  animations can be kept side by side.
+- Saving under the same name updates that entry; a new name saves a copy. The
+  toolbar shows the current name, with a `•` when it differs from the saved copy.
+- Storage is finite — a few large animations can fill the quota, which is
+  reported rather than failing silently.
 
 ## Layout
 

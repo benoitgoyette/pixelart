@@ -10,7 +10,11 @@
     <div class="app">
       <header class="topbar">
         <h1>pixelart</h1>
+        <span class="project-name" id="project-name">untitled</span>
         <div class="spacer"></div>
+        <button id="open-library" title="Open a saved animation">Open…</button>
+        <button id="save-animation" title="Save this animation">Save</button>
+        <span class="toolbar-divider"></span>
         <button id="undo" title="Undo (⌘Z)">Undo</button>
         <button id="redo" title="Redo (⇧⌘Z)">Redo</button>
         <button id="clear">Clear</button>
@@ -23,7 +27,7 @@
             <option value="16">16×</option>
           </select>
         </label>
-        <button id="export" class="primary">Save PNG</button>
+        <button id="export" class="primary">Export PNG</button>
       </header>
 
       <div class="body">
@@ -153,11 +157,11 @@
 
     <dialog id="save-dialog" class="save-dialog">
       <form method="dialog">
-        <h2>Save PNG</h2>
-        <label class="field" for="save-name">File name</label>
+        <h2 id="save-title">Export PNG</h2>
+        <label class="field" for="save-name" id="save-label">File name</label>
         <div class="filename-row">
           <input type="text" id="save-name" autocomplete="off" spellcheck="false" required />
-          <span class="extension">.png</span>
+          <span class="extension" id="save-suffix">.png</span>
         </div>
         <p class="hint" id="save-hint"></p>
         <div class="dialog-actions">
@@ -165,6 +169,17 @@
           <button type="submit" id="save-confirm" class="primary" value="save">Save</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="library-dialog" class="save-dialog library-dialog">
+      <h2>Saved animations</h2>
+      <div class="library-list" id="library-list"></div>
+      <p class="hint" id="library-empty" hidden>
+        Nothing saved yet. Use Save in the toolbar to keep this animation.
+      </p>
+      <div class="dialog-actions">
+        <button type="button" id="library-close">Close</button>
+      </div>
     </dialog>
 
     <script type="module" src="/src/main.ts"></script>

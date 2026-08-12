@@ -1,4 +1,15 @@
 import { PixelDoc, RGBA, Renderer, linePoints, rotate, toPngBlob } from './canvas';
+import {
+  SavedAnimation,
+  decodeFrame,
+  deleteAnimation,
+  encodeFrame,
+  findByName,
+  listAnimations,
+  newAnimationId,
+  saveAnimation,
+  uniqueName,
+} from './library';
 import { DEFAULT_PALETTE, hexToRgba, rgbaToCss, rgbaToHex } from './palette';
 import {
   BRUSH_SIZES,
@@ -51,6 +62,13 @@ const shapeFillPalette = el<HTMLDivElement>('shape-fill-palette');
 const saveDialog = el<HTMLDialogElement>('save-dialog');
 const saveName = el<HTMLInputElement>('save-name');
 const saveHint = el<HTMLParagraphElement>('save-hint');
+const saveTitle = el<HTMLHeadingElement>('save-title');
+const saveLabel = el<HTMLLabelElement>('save-label');
+const saveSuffix = el<HTMLSpanElement>('save-suffix');
+const libraryDialog = el<HTMLDialogElement>('library-dialog');
+const libraryList = el<HTMLDivElement>('library-list');
+const libraryEmpty = el<HTMLParagraphElement>('library-empty');
+const projectNameEl = el<HTMLSpanElement>('project-name');
 const filmstripEl = el<HTMLDivElement>('filmstrip');
 const frameCounter = el<HTMLSpanElement>('frame-counter');
 const playButton = el<HTMLButtonElement>('play');
@@ -336,6 +354,194 @@ function syncFilmstrip(): void {
   frameCounter.textContent = `${frameIndex + 1} / ${frames.length}`;
   frameViews[frameIndex]?.root.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
+
+// --- library -----------------------------------------------------------------
+
+/** Identity in the library, when this work came from or was saved to it. */
+let projectId: string | null = null;
+let projectName = '';
+/** Edited since the last library save. The autosave is separate and constant. */
+let dirty = false;
+
+function syncProjectName(): void {
+  projectNameEl.textContent = `${projectName || 'untitled'}${dirty ? ' •' : ''}`;
+  projectNameEl.title = dirty ? 'Unsaved changes' : 'Saved';
+}
+
+function frameWord(count: number): string {
+  return `${count} frame${count === 1 ? '' : 's'}`;
+}
+
+async function saveToLibrary(): Promise<void> {
+  stopPlayback();
+  cancelPolygon();
+  finishRotation();
+
+  const suggested = projectName || uniqueName('animation');
+  const entered = await promptForName({
+    title: 'Save animation',
+    label: 'Animation name',
+    value: suggested,
+    hint: `${frameWord(frames.length)} · ${doc.width} × ${doc.height}`,
+  });
+  if (entered === null) return status('save cancelled');
+
+  const name = entered.trim().slice(0, 60) || suggested;
+  const existing = findByName(name);
+  if (existing && existing.id !== projectId) {
+    if (!confirm(`Replace the saved animation "${existing.name}"?`)) return;
+  }
+
+  const entry: SavedAnimation = {
+    // Same name overwrites; a new name saves a copy, leaving the original.
+    id: existing?.id ?? (name === projectName && projectId ? projectId : newAnimationId()),
+    name,
+    width: doc.width,
+    height: doc.height,
+    index: frameIndex,
+    frames: frames.map((frame) => encodeFrame(frame.data)),
+    savedAt: Date.now(),
+  };
+
+  try {
+    saveAnimation(entry);
+  } catch {
+    return status('could not save — storage is full; delete an animation first');
+  }
+
+  projectId = entry.id;
+  projectName = entry.name;
+  dirty = false;
+  syncProjectName();
+  persistSettings();
+  status(`saved "${entry.name}" (${frameWord(frames.length)})`);
+}
+
+function loadFromLibrary(entry: SavedAnimation): boolean {
+  if (
+    dirty &&
+    !confirm(`Load "${entry.name}"? Unsaved changes to the current animation will be lost.`)
+  ) {
+    return false;
+  }
+
+  // Decode everything before touching the editor, so a corrupt entry can't
+  // leave a half-loaded animation behind.
+  const expected = entry.width * entry.height * 4;
+  const loaded: PixelDoc[] = [];
+  for (const encoded of entry.frames) {
+    const bytes = decodeFrame(encoded, expected);
+    if (bytes === null) {
+      status(`"${entry.name}" could not be read`);
+      return false;
+    }
+    loaded.push(new PixelDoc(entry.width, entry.height, bytes));
+  }
+
+  stopPlayback(false);
+  cancelPolygon();
+  finishRotation();
+
+  frames = loaded;
+  undoStack.length = 0;
+  redoStack.length = 0;
+  sizeSelect.value = String(entry.width);
+  buildFilmstrip();
+  showFrame(Math.min(entry.index, frames.length - 1));
+
+  projectId = entry.id;
+  projectName = entry.name;
+  persist();
+  dirty = false; // persist() marks dirty; a freshly loaded animation isn't
+  syncProjectName();
+  persistSettings();
+  status(`loaded "${entry.name}" — ${frameWord(frames.length)}`);
+  return true;
+}
+
+function formatWhen(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function buildLibraryList(): void {
+  const entries = listAnimations();
+  libraryList.textContent = '';
+  libraryEmpty.hidden = entries.length > 0;
+
+  for (const entry of entries) {
+    const row = document.createElement('div');
+    row.className = 'library-row';
+    row.classList.toggle('current', entry.id === projectId);
+
+    const thumb = document.createElement('canvas');
+    thumb.className = 'library-thumb';
+    thumb.width = entry.width;
+    thumb.height = entry.height;
+    const first = decodeFrame(entry.frames[0], entry.width * entry.height * 4);
+    if (first) {
+      thumb
+        .getContext('2d')
+        ?.putImageData(new ImageData(first.slice(), entry.width, entry.height), 0, 0);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'library-name';
+    name.textContent = entry.name;
+
+    const detail = document.createElement('span');
+    detail.className = 'library-detail';
+    detail.textContent = `${frameWord(entry.frames.length)} · ${entry.width} × ${entry.height} · ${formatWhen(entry.savedAt)}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'library-meta';
+    meta.append(name, detail);
+
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.className = 'primary';
+    load.textContent = 'Load';
+    load.addEventListener('click', () => {
+      if (loadFromLibrary(entry)) libraryDialog.close();
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', () => {
+      if (!confirm(`Delete "${entry.name}" permanently?`)) return;
+      deleteAnimation(entry.id);
+      if (entry.id === projectId) {
+        // The work stays open, it just no longer corresponds to a saved entry.
+        projectId = null;
+        dirty = true;
+        syncProjectName();
+        persistSettings();
+      }
+      buildLibraryList();
+      status(`deleted "${entry.name}"`);
+    });
+
+    row.append(thumb, meta, load, remove);
+    libraryList.appendChild(row);
+  }
+}
+
+function openLibrary(): void {
+  stopPlayback();
+  cancelPolygon();
+  finishRotation();
+  buildLibraryList();
+  libraryDialog.showModal();
+}
+
+el<HTMLButtonElement>('save-animation').addEventListener('click', saveToLibrary);
+el<HTMLButtonElement>('open-library').addEventListener('click', openLibrary);
+el<HTMLButtonElement>('library-close').addEventListener('click', () => libraryDialog.close());
 
 // --- playback ----------------------------------------------------------------
 
@@ -931,9 +1137,21 @@ function sanitizeFilename(input: string, fallback: string): string {
   return cleaned || fallback;
 }
 
-function askForFilename(suggested: string, hint: string): Promise<string | null> {
-  saveName.value = suggested;
-  saveHint.textContent = hint;
+/** Shared name prompt: PNG export and the animation library both use it. */
+function promptForName(options: {
+  title: string;
+  label: string;
+  value: string;
+  hint: string;
+  suffix?: string;
+}): Promise<string | null> {
+  saveTitle.textContent = options.title;
+  saveLabel.textContent = options.label;
+  saveHint.textContent = options.hint;
+  saveSuffix.textContent = options.suffix ?? '';
+  saveSuffix.hidden = !options.suffix;
+  saveName.value = options.value;
+
   saveDialog.returnValue = '';
   saveDialog.showModal();
   saveName.focus();
@@ -942,15 +1160,22 @@ function askForFilename(suggested: string, hint: string): Promise<string | null>
   return new Promise((resolve) => {
     saveDialog.addEventListener(
       'close',
-      () => {
-        // Cancel and Esc both leave returnValue empty.
-        resolve(
-          saveDialog.returnValue === 'save' ? sanitizeFilename(saveName.value, suggested) : null,
-        );
-      },
+      // Cancel and Esc both leave returnValue empty.
+      () => resolve(saveDialog.returnValue === 'save' ? saveName.value : null),
       { once: true },
     );
   });
+}
+
+async function askForFilename(suggested: string, hint: string): Promise<string | null> {
+  const entered = await promptForName({
+    title: 'Export PNG',
+    label: 'File name',
+    value: suggested,
+    hint,
+    suffix: '.png',
+  });
+  return entered === null ? null : sanitizeFilename(entered, suggested);
 }
 
 el<HTMLButtonElement>('save-cancel').addEventListener('click', () => saveDialog.close());
@@ -1023,6 +1248,12 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    void saveToLibrary();
+    return;
+  }
+
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     event.shiftKey ? redo() : undo();
@@ -1035,21 +1266,14 @@ window.addEventListener('keydown', (event) => {
 
 // --- persistence -------------------------------------------------------------
 
-function encodeFrame(data: Uint8ClampedArray): string {
-  let binary = '';
-  for (const byte of data) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function decodeFrame(encoded: string, expectedBytes: number): Uint8ClampedArray | null {
-  const binary = atob(encoded);
-  if (binary.length !== expectedBytes) return null;
-  const bytes = new Uint8ClampedArray(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 function persist(): void {
+  // Any edit worth autosaving is an edit the library copy doesn't have yet.
+  if (!dirty) {
+    dirty = true;
+    syncProjectName();
+    persistSettings();
+  }
+
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -1079,6 +1303,9 @@ function persistSettings(): void {
         shapeFill: shapeFillSelect.value,
         shapeFillColor: shapeFillColor.value,
         fps: fpsSelect.value,
+        projectId,
+        projectName,
+        dirty,
       }),
     );
   } catch {
@@ -1099,8 +1326,14 @@ function loadSettings(): void {
       shapeFill?: string;
       shapeFillColor?: string;
       fps?: string;
+      projectId?: string | null;
+      projectName?: string;
+      dirty?: boolean;
     };
     if (saved.fps) fpsSelect.value = saved.fps;
+    projectId = saved.projectId ?? null;
+    projectName = saved.projectName ?? '';
+    dirty = saved.dirty ?? false;
     if (saved.shapeFillColor) shapeFillColor.value = saved.shapeFillColor;
     if (saved.shapeFill) shapeFillSelect.value = saved.shapeFill;
     if (saved.backgroundColor) backgroundColor.value = saved.backgroundColor;
@@ -1166,6 +1399,7 @@ function status(message: string): void {
 }
 
 loadSettings(); // before the controls are built, so they render the saved state
+syncProjectName();
 buildTools();
 buildBrushSizes();
 buildPalette();
