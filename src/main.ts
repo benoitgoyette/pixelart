@@ -51,10 +51,21 @@ const shapeFillPalette = el<HTMLDivElement>('shape-fill-palette');
 const saveDialog = el<HTMLDialogElement>('save-dialog');
 const saveName = el<HTMLInputElement>('save-name');
 const saveHint = el<HTMLParagraphElement>('save-hint');
+const filmstripEl = el<HTMLDivElement>('filmstrip');
+const frameCounter = el<HTMLSpanElement>('frame-counter');
 
 const renderer = new Renderer(canvas);
 
-let doc = loadDoc() ?? new PixelDoc(32, 32);
+/** Set by loadFrames() and consumed at boot; declared first to dodge the TDZ. */
+let pendingFrameIndex = 0;
+
+/**
+ * Every frame of the animation, all the same size. `doc` always aliases the one
+ * being edited, so the drawing code stays frame-agnostic.
+ */
+let frames: PixelDoc[] = loadFrames();
+let frameIndex = 0;
+let doc = frames[0];
 let tool: ToolId = 'pencil';
 let color: RGBA = hexToRgba(colorInput.value);
 let zoom = Number(zoomInput.value);
@@ -67,8 +78,14 @@ let lastFilename = '';
 let pencilSize: BrushSize = 1;
 let eraserSize: BrushSize = 1;
 
-const undoStack: Uint8ClampedArray[] = [];
-const redoStack: Uint8ClampedArray[] = [];
+/** History spans frames, so each entry records which one it belongs to. */
+interface Snapshot {
+  frame: number;
+  data: Uint8ClampedArray;
+}
+
+const undoStack: Snapshot[] = [];
+const redoStack: Snapshot[] = [];
 let strokeOpen = false;
 let lastCell: [number, number] | null = null;
 /** Vertices placed so far, and the pixels underneath them. Empty when idle. */
@@ -86,7 +103,7 @@ sizeSelect.value = String(doc.width);
 
 function beginStroke(): void {
   if (strokeOpen) return;
-  undoStack.push(doc.snapshot());
+  undoStack.push({ frame: frameIndex, data: doc.snapshot() });
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
   strokeOpen = true;
@@ -111,8 +128,10 @@ function undo(): void {
   finishRotation();
   const previous = undoStack.pop();
   if (!previous) return status('nothing to undo');
-  redoStack.push(doc.snapshot());
-  doc.restore(previous);
+  // Follow the edit back to the frame it happened on.
+  if (previous.frame !== frameIndex) showFrame(previous.frame);
+  redoStack.push({ frame: frameIndex, data: doc.snapshot() });
+  doc.restore(previous.data);
   render();
   persist();
 }
@@ -122,11 +141,145 @@ function redo(): void {
   finishRotation();
   const next = redoStack.pop();
   if (!next) return status('nothing to redo');
-  undoStack.push(doc.snapshot());
-  doc.restore(next);
+  if (next.frame !== frameIndex) showFrame(next.frame);
+  undoStack.push({ frame: frameIndex, data: doc.snapshot() });
+  doc.restore(next.data);
   render();
   persist();
 }
+
+/**
+ * Keeps history pointing at the right frames after one is inserted or removed.
+ * `remap` returns the entry's new index, or null to drop it entirely.
+ */
+function remapHistory(remap: (frame: number) => number | null): void {
+  for (const stack of [undoStack, redoStack]) {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const next = remap(stack[i].frame);
+      if (next === null) stack.splice(i, 1);
+      else stack[i].frame = next;
+    }
+  }
+}
+
+// --- frames ------------------------------------------------------------------
+
+/** Thumbnails, parallel to `frames`, so a repaint doesn't rebuild the DOM. */
+let frameViews: Array<{ root: HTMLElement; thumb: HTMLCanvasElement }> = [];
+
+/** Switches the edited frame without disturbing pending tool state. */
+function showFrame(index: number): void {
+  frameIndex = Math.min(Math.max(index, 0), frames.length - 1);
+  doc = frames[frameIndex];
+  syncFilmstrip();
+  render();
+}
+
+function selectFrame(index: number): void {
+  if (index === frameIndex || index < 0 || index >= frames.length) return;
+  // Pending edits belong to the frame that started them.
+  cancelPolygon();
+  finishRotation();
+  showFrame(index);
+  status(`frame ${frameIndex + 1} of ${frames.length}`);
+}
+
+function buildFilmstrip(): void {
+  filmstripEl.textContent = '';
+  frameViews = frames.map((frame, index) => {
+    const root = document.createElement('button');
+    root.type = 'button';
+    root.className = 'frame-item';
+    root.title = `Edit frame ${index + 1}`;
+
+    const label = document.createElement('span');
+    label.className = 'frame-label';
+    label.textContent = String(index + 1);
+
+    const thumb = document.createElement('canvas');
+    thumb.className = 'frame-thumb';
+    thumb.width = frame.width;
+    thumb.height = frame.height;
+
+    root.append(label, thumb);
+    root.addEventListener('click', () => selectFrame(index));
+    filmstripEl.appendChild(root);
+    return { root, thumb };
+  });
+  syncFilmstrip();
+}
+
+function paintThumb(index: number): void {
+  const view = frameViews[index];
+  if (!view) return;
+  const ctx = view.thumb.getContext('2d');
+  if (!ctx) return;
+  const frame = frames[index];
+  ctx.clearRect(0, 0, view.thumb.width, view.thumb.height);
+  ctx.putImageData(new ImageData(frame.data.slice(), frame.width, frame.height), 0, 0);
+}
+
+function syncFilmstrip(): void {
+  frameViews.forEach((view, index) => {
+    view.root.classList.toggle('current', index === frameIndex);
+    paintThumb(index);
+  });
+  frameCounter.textContent = `${frameIndex + 1} / ${frames.length}`;
+  frameViews[frameIndex]?.root.scrollIntoView({ block: 'nearest' });
+}
+
+/** Copies the current drawing into a new frame placed right after it. */
+function newFrame(): void {
+  cancelPolygon();
+  finishRotation();
+
+  frames.splice(frameIndex + 1, 0, new PixelDoc(doc.width, doc.height, doc.snapshot()));
+  // Everything after the insertion point shifts up by one.
+  const inserted = frameIndex + 1;
+  remapHistory((frame) => (frame >= inserted ? frame + 1 : frame));
+
+  buildFilmstrip();
+  showFrame(inserted);
+  persist();
+  status(`frame ${frameIndex + 1} of ${frames.length} — copied from the previous one`);
+}
+
+function deleteFrame(): void {
+  if (frames.length === 1) return status('an animation needs at least one frame');
+  if (!confirm(`Delete frame ${frameIndex + 1} of ${frames.length}?`)) return;
+
+  cancelPolygon();
+  finishRotation();
+
+  const removed = frameIndex;
+  frames.splice(removed, 1);
+  // Edits to the deleted frame can no longer be undone onto anything.
+  remapHistory((frame) => (frame === removed ? null : frame > removed ? frame - 1 : frame));
+
+  buildFilmstrip();
+  showFrame(Math.min(removed, frames.length - 1));
+  persist();
+  status(`deleted frame ${removed + 1} — ${frames.length} left`);
+}
+
+el<HTMLButtonElement>('new-frame').addEventListener('click', newFrame);
+el<HTMLButtonElement>('delete-frame').addEventListener('click', deleteFrame);
+
+// Scrolling the strip steps between frames. Accumulated so one flick of a
+// trackpad advances a frame or two rather than racing through the whole set.
+let wheelTravel = 0;
+filmstripEl.addEventListener(
+  'wheel',
+  (event) => {
+    if (frames.length < 2) return;
+    event.preventDefault();
+    wheelTravel += event.deltaY;
+    if (Math.abs(wheelTravel) < 40) return;
+    selectFrame(frameIndex + Math.sign(wheelTravel));
+    wheelTravel = 0;
+  },
+  { passive: false },
+);
 
 // --- drawing -----------------------------------------------------------------
 
@@ -443,10 +596,12 @@ function setColor(next: RGBA): void {
 function setDocSize(size: number): void {
   cancelPolygon();
   finishRotation();
-  doc = new PixelDoc(size, size);
+  // Frames share one canvas size, so resizing starts a fresh animation.
+  frames = [new PixelDoc(size, size)];
   undoStack.length = 0;
   redoStack.length = 0;
-  render();
+  buildFilmstrip();
+  showFrame(0);
   persist();
   status(`new ${size} × ${size} canvas`);
 }
@@ -552,8 +707,12 @@ zoomInput.addEventListener('input', () => {
 
 sizeSelect.addEventListener('change', () => {
   const size = Number(sizeSelect.value);
-  const blank = doc.data.every((channel) => channel === 0);
-  if (!blank && !confirm(`Start a new ${size} × ${size} canvas? Current art will be lost.`)) {
+  const blank = frames.every((frame) => frame.data.every((channel) => channel === 0));
+  const warning =
+    frames.length > 1
+      ? `Start a new ${size} × ${size} canvas? All ${frames.length} frames will be lost.`
+      : `Start a new ${size} × ${size} canvas? Current art will be lost.`;
+  if (!blank && !confirm(warning)) {
     sizeSelect.value = String(doc.width);
     return;
   }
@@ -576,7 +735,13 @@ el<HTMLButtonElement>('clear').addEventListener('click', () => {
 
 /** Suggests the last name you used, falling back to one describing the export. */
 function suggestedFilename(scale: number): string {
-  return lastFilename || `pixelart-${doc.width}x${doc.height}@${scale}x`;
+  if (lastFilename) {
+    // Keep a per-frame suffix current instead of saving frame 3 over frame 1.
+    const base = lastFilename.replace(/-frame\d+$/, '');
+    return frames.length > 1 ? `${base}-frame${frameIndex + 1}` : base;
+  }
+  const stem = `pixelart-${doc.width}x${doc.height}@${scale}x`;
+  return frames.length > 1 ? `${stem}-frame${frameIndex + 1}` : stem;
 }
 
 /**
@@ -642,6 +807,12 @@ el<HTMLButtonElement>('export').addEventListener('click', async () => {
 window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
 
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    selectFrame(frameIndex + (event.key === 'ArrowDown' ? 1 : -1));
+    return;
+  }
+
   if (event.key === 'Escape' && polygonBase !== null) {
     event.preventDefault();
     cancelPolygon();
@@ -667,16 +838,34 @@ window.addEventListener('keydown', (event) => {
 
 // --- persistence -------------------------------------------------------------
 
+function encodeFrame(data: Uint8ClampedArray): string {
+  let binary = '';
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function decodeFrame(encoded: string, expectedBytes: number): Uint8ClampedArray | null {
+  const binary = atob(encoded);
+  if (binary.length !== expectedBytes) return null;
+  const bytes = new Uint8ClampedArray(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 function persist(): void {
   try {
-    let binary = '';
-    for (const byte of doc.data) binary += String.fromCharCode(byte);
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ width: doc.width, height: doc.height, data: btoa(binary) }),
+      JSON.stringify({
+        width: doc.width,
+        height: doc.height,
+        index: frameIndex,
+        frames: frames.map((frame) => encodeFrame(frame.data)),
+      }),
     );
   } catch {
-    status('could not save locally');
+    // Many frames at 128px can outgrow the storage quota.
+    status('could not save locally — try fewer frames or a smaller canvas');
   }
 }
 
@@ -728,28 +917,42 @@ function loadSettings(): void {
   }
 }
 
-function loadDoc(): PixelDoc | null {
+/** Always returns at least one frame. `data` is the pre-animation save format. */
+function loadFrames(): PixelDoc[] {
+  const blank = () => [new PixelDoc(32, 32)];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const { width, height, data } = JSON.parse(raw) as {
+    if (!raw) return blank();
+
+    const saved = JSON.parse(raw) as {
       width: number;
       height: number;
-      data: string;
+      data?: string;
+      frames?: string[];
+      index?: number;
     };
-    const binary = atob(data);
-    if (binary.length !== width * height * 4) return null;
-    const bytes = new Uint8ClampedArray(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return new PixelDoc(width, height, bytes);
+    const encoded = saved.frames ?? (saved.data ? [saved.data] : []);
+    const expected = saved.width * saved.height * 4;
+
+    const loaded: PixelDoc[] = [];
+    for (const entry of encoded) {
+      const bytes = decodeFrame(entry, expected);
+      if (bytes === null) return blank(); // a size mismatch would corrupt the strip
+      loaded.push(new PixelDoc(saved.width, saved.height, bytes));
+    }
+    if (loaded.length === 0) return blank();
+
+    pendingFrameIndex = Math.min(Math.max(saved.index ?? 0, 0), loaded.length - 1);
+    return loaded;
   } catch {
-    return null;
+    return blank();
   }
 }
 
 // --- boot --------------------------------------------------------------------
 
 function render(): void {
+  paintThumb(frameIndex);
   renderer.render(doc, {
     zoom,
     showGrid,
@@ -769,4 +972,6 @@ buildPalette();
 setColor(color);
 zoomValue.textContent = `${zoom}×`;
 applyShapeFill();
+buildFilmstrip();
+showFrame(pendingFrameIndex);
 applyBackground();

@@ -117,9 +117,24 @@
           </section>
         </aside>
 
-        <main class="stage" id="stage">
-          <canvas id="canvas"></canvas>
-        </main>
+        <div class="workarea">
+          <main class="stage" id="stage">
+            <canvas id="canvas"></canvas>
+          </main>
+
+          <section class="filmstrip-panel">
+            <header class="filmstrip-header">
+              <h2>Frames</h2>
+              <span class="frame-counter" id="frame-counter">1 / 1</span>
+              <div class="spacer"></div>
+              <button type="button" id="new-frame" class="primary" title="Copy this frame into a new one">
+                New frame
+              </button>
+              <button type="button" id="delete-frame" title="Delete this frame">Delete</button>
+            </header>
+            <div class="filmstrip" id="filmstrip"></div>
+          </section>
+        </div>
       </div>
 
       <footer class="statusbar">

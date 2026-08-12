@@ -104,12 +104,106 @@ button.primary {
   color: var(--text-dim);
 }
 
+.workarea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .stage {
   flex: 1;
   display: grid;
   place-items: center;
   overflow: auto;
   padding: 32px;
+  min-height: 0;
+}
+
+/* filmstrip */
+
+.filmstrip-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  max-height: 230px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+.filmstrip-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.filmstrip-header h2 {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.frame-counter {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.filmstrip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.frame-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  width: 150px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  cursor: pointer;
+}
+
+.frame-item.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.frame-label {
+  width: 18px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.frame-item.current .frame-label {
+  color: var(--text);
+}
+
+.frame-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  image-rendering: pixelated;
+  /* Checkerboard, so transparent frames don't read as solid dark ones. */
+  background-color: #31313a;
+  background-image:
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%),
+    linear-gradient(45deg, #3a3a42 25%, transparent 25%, transparent 75%, #3a3a42 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 6px 6px;
 }
 
 #canvas {
