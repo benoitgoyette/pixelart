@@ -45,13 +45,18 @@ eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
 - All frames share one canvas size, so changing Size starts a fresh animation.
 - 16 / 32 / 64 / 128 canvases, 1–32× zoom, toggleable pixel grid.
 - Transparent by default, with an optional solid background for preview and export.
-- PNG export of the current frame at 1× / 4× / 8× / 16× with nearest-neighbor
-  scaling and a filename prompt.
+- **Export PNG** saves the current frame; **Export frames** saves every frame as
+  one sprite sheet — a horizontal strip of uniform cells, which is what engines
+  slice by frame width. Both honor the 1× / 4× / 8× / 16× scale, use
+  nearest-neighbor, and keep transparency.
 
 **Saving** — work is kept in `localStorage`, in two separate places.
 
 - The current drawing autosaves continuously, so a reload picks up where you left
   off whether or not you ever save by name.
+- **New** starts an empty drawing at the current canvas size. If there are
+  unsaved changes it offers Save / Don't save / Cancel first, as does loading
+  another animation.
 - **Save** (`⌘S`) stores the animation under a name; **Open…** lists everything
   saved with a thumbnail, frame count, size, and date, to load or delete. Several
   animations can be kept side by side.

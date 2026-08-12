@@ -12,12 +12,51 @@
         <h1>pixelart</h1>
         <span class="project-name" id="project-name">untitled</span>
         <div class="spacer"></div>
-        <button id="open-library" title="Open a saved animation">Open…</button>
-        <button id="save-animation" title="Save this animation">Save</button>
+        <button id="new-drawing" title="Start a new empty drawing">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+            <path d="M14 3v5h5" />
+          </svg>
+          New
+        </button>
+        <button id="open-library" title="Open a saved animation">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          </svg>
+          Open…
+        </button>
+        <button id="save-animation" title="Save this animation (⌘S)">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M5 4h11l3 3v13H5z" />
+            <path d="M9 4v5h6V4" />
+            <path d="M8 14h8v6H8z" />
+          </svg>
+          Save
+        </button>
         <span class="toolbar-divider"></span>
-        <button id="undo" title="Undo (⌘Z)">Undo</button>
-        <button id="redo" title="Redo (⇧⌘Z)">Redo</button>
-        <button id="clear">Clear</button>
+        <button id="undo" title="Undo (⌘Z)">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9 14 4 9l5-5" />
+            <path d="M4 9h9a6 6 0 0 1 0 12h-3" />
+          </svg>
+          Undo
+        </button>
+        <button id="redo" title="Redo (⇧⌘Z)">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m15 14 5-5-5-5" />
+            <path d="M20 9h-9a6 6 0 0 0 0 12h3" />
+          </svg>
+          Redo
+        </button>
+        <button id="clear" title="Clear this frame">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h16" />
+            <path d="M9 7V4h6v3" />
+            <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+            <path d="M10 11v6M14 11v6" />
+          </svg>
+          Clear
+        </button>
         <label class="field">
           Export
           <select id="export-scale">
@@ -27,7 +66,14 @@
             <option value="16">16×</option>
           </select>
         </label>
-        <button id="export" class="primary">Export PNG</button>
+        <button id="export" class="primary" title="Export the current frame as a PNG">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M12 3v12" />
+            <path d="m7 10 5 5 5-5" />
+            <path d="M4 20h16" />
+          </svg>
+          Export PNG
+        </button>
       </header>
 
       <div class="body">
@@ -144,6 +190,15 @@
                 New frame
               </button>
               <button type="button" id="delete-frame" title="Delete this frame">Delete</button>
+              <span class="toolbar-divider"></span>
+              <button type="button" id="export-frames" title="Export every frame as one sprite sheet">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 3v12" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M4 20h16" />
+                </svg>
+                Export frames
+              </button>
             </header>
             <div class="filmstrip" id="filmstrip"></div>
           </section>
@@ -169,6 +224,16 @@
           <button type="submit" id="save-confirm" class="primary" value="save">Save</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="unsaved-dialog" class="save-dialog">
+      <h2>Unsaved changes</h2>
+      <p class="hint" id="unsaved-message"></p>
+      <div class="dialog-actions">
+        <button type="button" id="unsaved-cancel">Cancel</button>
+        <button type="button" id="unsaved-discard">Don't save</button>
+        <button type="button" id="unsaved-save" class="primary">Save</button>
+      </div>
     </dialog>
 
     <dialog id="library-dialog" class="save-dialog library-dialog">

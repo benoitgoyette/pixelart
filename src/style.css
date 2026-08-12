@@ -72,6 +72,9 @@ body {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -79,6 +82,18 @@ button {
   color: var(--text);
   font: inherit;
   cursor: pointer;
+}
+
+/* Line icons inherit the button's text color, so they follow every state. */
+.icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 button:hover {

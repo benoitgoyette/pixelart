@@ -275,6 +275,54 @@ export function toPngBlob(
   });
 }
 
+/** Widest sheet browsers reliably encode; beyond this, canvases silently fail. */
+export const MAX_SHEET_PX = 16384;
+
+/**
+ * Packs every frame into one PNG, laid out left to right at `scale`. Frames keep
+ * a uniform cell size, so an engine can slice the strip by width alone.
+ */
+export function toSpriteSheetBlob(
+  docs: PixelDoc[],
+  scale: number,
+  background: string | null = null,
+): Promise<Blob> {
+  if (docs.length === 0) return Promise.reject(new Error('no frames to export'));
+
+  const cellWidth = docs[0].width * scale;
+  const cellHeight = docs[0].height * scale;
+
+  const sheet = document.createElement('canvas');
+  sheet.width = cellWidth * docs.length;
+  sheet.height = cellHeight;
+
+  const ctx = require2d(sheet);
+  if (background !== null) {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, sheet.width, sheet.height);
+  }
+  ctx.imageSmoothingEnabled = false;
+
+  // One scratch canvas reused for every frame's 1:1 blit.
+  const scratch = document.createElement('canvas');
+  scratch.width = docs[0].width;
+  scratch.height = docs[0].height;
+  const scratchCtx = require2d(scratch);
+
+  docs.forEach((doc, index) => {
+    scratchCtx.clearRect(0, 0, scratch.width, scratch.height);
+    scratchCtx.putImageData(new ImageData(doc.data.slice(), doc.width, doc.height), 0, 0);
+    ctx.drawImage(scratch, index * cellWidth, 0, cellWidth, cellHeight);
+  });
+
+  return new Promise((resolve, reject) => {
+    sheet.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error('PNG encoding failed'))),
+      'image/png',
+    );
+  });
+}
+
 function require2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('2D canvas context unavailable');

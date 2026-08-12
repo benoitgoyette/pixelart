@@ -1,4 +1,13 @@
-import { PixelDoc, RGBA, Renderer, linePoints, rotate, toPngBlob } from './canvas';
+import {
+  MAX_SHEET_PX,
+  PixelDoc,
+  RGBA,
+  Renderer,
+  linePoints,
+  rotate,
+  toPngBlob,
+  toSpriteSheetBlob,
+} from './canvas';
 import {
   SavedAnimation,
   decodeFrame,
@@ -65,6 +74,8 @@ const saveHint = el<HTMLParagraphElement>('save-hint');
 const saveTitle = el<HTMLHeadingElement>('save-title');
 const saveLabel = el<HTMLLabelElement>('save-label');
 const saveSuffix = el<HTMLSpanElement>('save-suffix');
+const unsavedDialog = el<HTMLDialogElement>('unsaved-dialog');
+const unsavedMessage = el<HTMLParagraphElement>('unsaved-message');
 const libraryDialog = el<HTMLDialogElement>('library-dialog');
 const libraryList = el<HTMLDivElement>('library-list');
 const libraryEmpty = el<HTMLParagraphElement>('library-empty');
@@ -372,7 +383,49 @@ function frameWord(count: number): string {
   return `${count} frame${count === 1 ? '' : 's'}`;
 }
 
-async function saveToLibrary(): Promise<void> {
+/**
+ * Three-way prompt for work that would be lost. Esc and Cancel both mean
+ * "stay put", so the destructive path always needs a deliberate answer.
+ */
+function askUnsaved(message: string): Promise<'save' | 'discard' | 'cancel'> {
+  unsavedMessage.textContent = message;
+  unsavedDialog.returnValue = '';
+  unsavedDialog.showModal();
+
+  return new Promise((resolve) => {
+    unsavedDialog.addEventListener(
+      'close',
+      () => {
+        const answer = unsavedDialog.returnValue;
+        resolve(answer === 'save' || answer === 'discard' ? answer : 'cancel');
+      },
+      { once: true },
+    );
+  });
+}
+
+el<HTMLButtonElement>('unsaved-save').addEventListener('click', () => unsavedDialog.close('save'));
+el<HTMLButtonElement>('unsaved-discard').addEventListener('click', () =>
+  unsavedDialog.close('discard'),
+);
+el<HTMLButtonElement>('unsaved-cancel').addEventListener('click', () => unsavedDialog.close());
+
+/**
+ * Runs the save-first flow for an action that would discard the current work.
+ * Returns false when the user backed out, or when the save they asked for
+ * didn't happen — either way the caller must not proceed.
+ */
+async function clearedToDiscard(action: string): Promise<boolean> {
+  if (!dirty) return true;
+  const subject = projectName ? `"${projectName}"` : 'This drawing';
+  const answer = await askUnsaved(`${subject} has unsaved changes. Save before ${action}?`);
+  if (answer === 'cancel') return false;
+  if (answer === 'discard') return true;
+  return saveToLibrary();
+}
+
+/** Resolves true only when the animation actually reached the library. */
+async function saveToLibrary(): Promise<boolean> {
   stopPlayback();
   cancelPolygon();
   finishRotation();
@@ -384,12 +437,15 @@ async function saveToLibrary(): Promise<void> {
     value: suggested,
     hint: `${frameWord(frames.length)} · ${doc.width} × ${doc.height}`,
   });
-  if (entered === null) return status('save cancelled');
+  if (entered === null) {
+    status('save cancelled');
+    return false;
+  }
 
   const name = entered.trim().slice(0, 60) || suggested;
   const existing = findByName(name);
   if (existing && existing.id !== projectId) {
-    if (!confirm(`Replace the saved animation "${existing.name}"?`)) return;
+    if (!confirm(`Replace the saved animation "${existing.name}"?`)) return false;
   }
 
   const entry: SavedAnimation = {
@@ -406,7 +462,8 @@ async function saveToLibrary(): Promise<void> {
   try {
     saveAnimation(entry);
   } catch {
-    return status('could not save — storage is full; delete an animation first');
+    status('could not save — storage is full; delete an animation first');
+    return false;
   }
 
   projectId = entry.id;
@@ -415,15 +472,36 @@ async function saveToLibrary(): Promise<void> {
   syncProjectName();
   persistSettings();
   status(`saved "${entry.name}" (${frameWord(frames.length)})`);
+  return true;
 }
 
-function loadFromLibrary(entry: SavedAnimation): boolean {
-  if (
-    dirty &&
-    !confirm(`Load "${entry.name}"? Unsaved changes to the current animation will be lost.`)
-  ) {
-    return false;
+/** Starts over: one empty frame at the current canvas size, no library identity. */
+async function newDrawing(): Promise<void> {
+  stopPlayback();
+  cancelPolygon();
+  finishRotation();
+
+  if (!(await clearedToDiscard('starting a new drawing'))) {
+    return status('new drawing cancelled');
   }
+
+  frames = [new PixelDoc(doc.width, doc.height)];
+  undoStack.length = 0;
+  redoStack.length = 0;
+  projectId = null;
+  projectName = '';
+
+  buildFilmstrip();
+  showFrame(0);
+  persist();
+  dirty = false; // persist() marks dirty; an empty drawing has nothing to lose
+  syncProjectName();
+  persistSettings();
+  status(`new drawing — ${doc.width} × ${doc.height}`);
+}
+
+async function loadFromLibrary(entry: SavedAnimation): Promise<boolean> {
+  if (!(await clearedToDiscard(`loading "${entry.name}"`))) return false;
 
   // Decode everything before touching the editor, so a corrupt entry can't
   // leave a half-loaded animation behind.
@@ -505,8 +583,11 @@ function buildLibraryList(): void {
     load.type = 'button';
     load.className = 'primary';
     load.textContent = 'Load';
-    load.addEventListener('click', () => {
-      if (loadFromLibrary(entry)) libraryDialog.close();
+    load.addEventListener('click', async () => {
+      // The library dialog closes first: the unsaved prompt is itself modal,
+      // and two stacked modals leave the buttons unreachable.
+      libraryDialog.close();
+      if (!(await loadFromLibrary(entry))) openLibrary();
     });
 
     const remove = document.createElement('button');
@@ -539,6 +620,7 @@ function openLibrary(): void {
   libraryDialog.showModal();
 }
 
+el<HTMLButtonElement>('new-drawing').addEventListener('click', newDrawing);
 el<HTMLButtonElement>('save-animation').addEventListener('click', saveToLibrary);
 el<HTMLButtonElement>('open-library').addEventListener('click', openLibrary);
 el<HTMLButtonElement>('library-close').addEventListener('click', () => libraryDialog.close());
@@ -1194,14 +1276,50 @@ el<HTMLButtonElement>('export').addEventListener('click', async () => {
   lastFilename = name;
   persistSettings();
 
-  const blob = await toPngBlob(doc, scale, background);
+  downloadBlob(await toPngBlob(doc, scale, background), `${name}.png`);
+  status(`saved ${name}.png at ${scale}×${background === null ? ' with transparency' : ''}`);
+});
+
+function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${name}.png`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
-  status(`saved ${name}.png at ${scale}×${background === null ? ' with transparency' : ''}`);
+}
+
+el<HTMLButtonElement>('export-frames').addEventListener('click', async () => {
+  stopPlayback();
+  cancelPolygon();
+  finishRotation();
+
+  const scale = Number(exportScale.value);
+  const sheetWidth = doc.width * scale * frames.length;
+  if (sheetWidth > MAX_SHEET_PX) {
+    return status(
+      `sheet would be ${sheetWidth}px wide — lower the export scale (max ${MAX_SHEET_PX}px)`,
+    );
+  }
+
+  const base = (projectName || 'pixelart').trim().replace(/\s+/g, '-');
+  const suggested = `${base}-sheet-${doc.width}x${doc.height}-${frames.length}frames`;
+  const entered = await promptForName({
+    title: 'Export sprite sheet',
+    label: 'File name',
+    value: suggested,
+    hint: `${frameWord(frames.length)} in a row at ${scale}× — ${sheetWidth} × ${doc.height * scale}px, ${doc.width * scale}px per frame`,
+    suffix: '.png',
+  });
+  if (entered === null) return status('export cancelled');
+
+  const name = sanitizeFilename(entered, suggested);
+  try {
+    downloadBlob(await toSpriteSheetBlob(frames, scale, background), `${name}.png`);
+  } catch {
+    return status('could not build the sprite sheet');
+  }
+  status(`exported ${frameWord(frames.length)} as ${name}.png`);
 });
 
 window.addEventListener('keydown', (event) => {
