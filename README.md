@@ -35,7 +35,9 @@ eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
 
 - **New frame** copies the current drawing into a new frame after it, so each
   frame starts from the last rather than from nothing.
-- Move between frames by clicking a thumbnail, scrolling the strip, or `↑` / `↓`.
+- Move between frames by clicking a thumbnail, scrolling the strip, or pressing
+  `←` / `→`.
+- **Play** previews the animation in the canvas at 4–24 fps (`Space` toggles it).
 - **Delete** removes the current frame. Adding and deleting frames is not undoable.
 - All frames share one canvas size, so changing Size starts a fresh animation.
 - 16 / 32 / 64 / 128 canvases, 1–32× zoom, toggleable pixel grid.

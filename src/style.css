@@ -126,7 +126,6 @@ button.primary {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  max-height: 230px;
   background: var(--panel);
   border-top: 1px solid var(--border);
 }
@@ -147,6 +146,24 @@ button.primary {
   color: var(--text-dim);
 }
 
+.inline-field {
+  margin: 0;
+}
+
+.inline-field select {
+  margin: 0;
+  width: auto;
+}
+
+#play {
+  min-width: 84px;
+}
+
+#play.playing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .frame-counter {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -155,21 +172,22 @@ button.primary {
 
 .filmstrip {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 12px;
-  overflow-y: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   overscroll-behavior: contain;
 }
 
 .frame-item {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
-  width: 150px;
-  padding: 6px 10px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-raised);
@@ -182,8 +200,9 @@ button.primary {
 }
 
 .frame-label {
-  width: 18px;
-  font-size: 12px;
+  order: 1; /* number sits under its thumbnail */
+  font-size: 11px;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
 }

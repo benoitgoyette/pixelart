@@ -53,6 +53,8 @@ const saveName = el<HTMLInputElement>('save-name');
 const saveHint = el<HTMLParagraphElement>('save-hint');
 const filmstripEl = el<HTMLDivElement>('filmstrip');
 const frameCounter = el<HTMLSpanElement>('frame-counter');
+const playButton = el<HTMLButtonElement>('play');
+const fpsSelect = el<HTMLSelectElement>('fps');
 
 const renderer = new Renderer(canvas);
 
@@ -123,6 +125,7 @@ function discardStroke(): void {
 }
 
 function undo(): void {
+  stopPlayback();
   // Mid-polygon, undo means "drop the polygon" rather than reaching past it.
   if (polygonBase !== null) return cancelPolygon();
   finishRotation();
@@ -137,6 +140,7 @@ function undo(): void {
 }
 
 function redo(): void {
+  stopPlayback();
   cancelPolygon();
   finishRotation();
   const next = redoStack.pop();
@@ -176,6 +180,8 @@ function showFrame(index: number): void {
 }
 
 function selectFrame(index: number): void {
+  // Picking a frame by hand means "stop here", not "stop and jump back".
+  stopPlayback(false);
   if (index === frameIndex || index < 0 || index >= frames.length) return;
   // Pending edits belong to the frame that started them.
   cancelPolygon();
@@ -225,11 +231,66 @@ function syncFilmstrip(): void {
     paintThumb(index);
   });
   frameCounter.textContent = `${frameIndex + 1} / ${frames.length}`;
-  frameViews[frameIndex]?.root.scrollIntoView({ block: 'nearest' });
+  frameViews[frameIndex]?.root.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
+
+// --- playback ----------------------------------------------------------------
+
+let playTimer: number | null = null;
+/** The frame being edited when playback started, returned to when it stops. */
+let playReturnIndex = 0;
+
+function isPlaying(): boolean {
+  return playTimer !== null;
+}
+
+function startPlayback(): void {
+  if (frames.length < 2) return status('add a second frame to preview the animation');
+  cancelPolygon();
+  finishRotation();
+
+  playReturnIndex = frameIndex;
+  playButton.textContent = '■ Stop';
+  playButton.classList.add('playing');
+
+  // Chained timeouts rather than an interval: the delay is re-read each tick,
+  // so changing the frame rate mid-playback takes effect immediately.
+  const step = () => {
+    showFrame((frameIndex + 1) % frames.length);
+    playTimer = window.setTimeout(step, 1000 / Number(fpsSelect.value));
+  };
+  playTimer = window.setTimeout(step, 1000 / Number(fpsSelect.value));
+  status(`playing ${frames.length} frames at ${fpsSelect.value} fps`);
+}
+
+/**
+ * Stops the preview. `returnToStart` puts you back on the frame you were
+ * editing; passing false keeps whichever frame is on screen.
+ */
+function stopPlayback(returnToStart = true): void {
+  if (playTimer === null) return;
+  window.clearTimeout(playTimer);
+  playTimer = null;
+  playButton.textContent = '▶ Play';
+  playButton.classList.remove('playing');
+
+  if (returnToStart && playReturnIndex < frames.length) showFrame(playReturnIndex);
+  status(`stopped on frame ${frameIndex + 1}`);
+}
+
+function togglePlayback(): void {
+  isPlaying() ? stopPlayback() : startPlayback();
+}
+
+playButton.addEventListener('click', togglePlayback);
+fpsSelect.addEventListener('change', () => {
+  persistSettings();
+  status(`${fpsSelect.value} fps`);
+});
 
 /** Copies the current drawing into a new frame placed right after it. */
 function newFrame(): void {
+  stopPlayback();
   cancelPolygon();
   finishRotation();
 
@@ -245,6 +306,7 @@ function newFrame(): void {
 }
 
 function deleteFrame(): void {
+  stopPlayback();
   if (frames.length === 1) return status('an animation needs at least one frame');
   if (!confirm(`Delete frame ${frameIndex + 1} of ${frames.length}?`)) return;
 
@@ -273,7 +335,9 @@ filmstripEl.addEventListener(
   (event) => {
     if (frames.length < 2) return;
     event.preventDefault();
-    wheelTravel += event.deltaY;
+    // The strip runs horizontally, but a plain wheel only reports deltaY —
+    // take whichever axis the gesture actually moved along.
+    wheelTravel += Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
     if (Math.abs(wheelTravel) < 40) return;
     selectFrame(frameIndex + Math.sign(wheelTravel));
     wheelTravel = 0;
@@ -417,6 +481,10 @@ function cancelPolygon(): void {
 }
 
 canvas.addEventListener('pointerdown', (event) => {
+  // Clicking the canvas mid-preview stops on the frame shown rather than
+  // painting onto whatever frame happened to be passing.
+  if (isPlaying()) return stopPlayback(false);
+
   canvas.setPointerCapture(event.pointerId);
   // Painting banks any rotation still on the slider, so the two never share an
   // undo entry.
@@ -594,6 +662,7 @@ function setColor(next: RGBA): void {
 }
 
 function setDocSize(size: number): void {
+  stopPlayback(false);
   cancelPolygon();
   finishRotation();
   // Frames share one canvas size, so resizing starts a fresh animation.
@@ -663,6 +732,7 @@ gridToggle.addEventListener('change', () => {
  * resampling of whatever the last frame produced.
  */
 function previewRotation(angle: number): void {
+  stopPlayback();
   cancelPolygon();
   if (rotateBase === null) {
     beginStroke();
@@ -723,6 +793,7 @@ el<HTMLButtonElement>('undo').addEventListener('click', undo);
 el<HTMLButtonElement>('redo').addEventListener('click', redo);
 
 el<HTMLButtonElement>('clear').addEventListener('click', () => {
+  stopPlayback();
   if (!confirm('Clear the canvas?')) return;
   cancelPolygon();
   finishRotation();
@@ -782,6 +853,7 @@ function askForFilename(suggested: string, hint: string): Promise<string | null>
 el<HTMLButtonElement>('save-cancel').addEventListener('click', () => saveDialog.close());
 
 el<HTMLButtonElement>('export').addEventListener('click', async () => {
+  stopPlayback();
   const scale = Number(exportScale.value);
   const name = await askForFilename(
     suggestedFilename(scale),
@@ -805,11 +877,32 @@ el<HTMLButtonElement>('export').addEventListener('click', async () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+  // Buttons included: Space would otherwise both press the focused button and
+  // toggle playback.
+  if (
+    event.target instanceof HTMLInputElement ||
+    event.target instanceof HTMLSelectElement ||
+    event.target instanceof HTMLButtonElement
+  ) {
+    return;
+  }
 
-  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+  if (event.key === ' ') {
     event.preventDefault();
-    selectFrame(frameIndex + (event.key === 'ArrowDown' ? 1 : -1));
+    togglePlayback();
+    return;
+  }
+
+  // Left/right match the strip's direction; up/down still work out of habit.
+  const frameStep: Record<string, number> = {
+    ArrowLeft: -1,
+    ArrowUp: -1,
+    ArrowRight: 1,
+    ArrowDown: 1,
+  };
+  if (event.key in frameStep) {
+    event.preventDefault();
+    selectFrame(frameIndex + frameStep[event.key]);
     return;
   }
 
@@ -881,6 +974,7 @@ function persistSettings(): void {
         eraserSize,
         shapeFill: shapeFillSelect.value,
         shapeFillColor: shapeFillColor.value,
+        fps: fpsSelect.value,
       }),
     );
   } catch {
@@ -900,7 +994,9 @@ function loadSettings(): void {
       eraserSize?: number;
       shapeFill?: string;
       shapeFillColor?: string;
+      fps?: string;
     };
+    if (saved.fps) fpsSelect.value = saved.fps;
     if (saved.shapeFillColor) shapeFillColor.value = saved.shapeFillColor;
     if (saved.shapeFill) shapeFillSelect.value = saved.shapeFill;
     if (saved.backgroundColor) backgroundColor.value = saved.backgroundColor;
