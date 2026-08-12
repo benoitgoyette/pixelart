@@ -208,11 +208,114 @@ function buildFilmstrip(): void {
     thumb.height = frame.height;
 
     root.append(label, thumb);
-    root.addEventListener('click', () => selectFrame(index));
+    root.addEventListener('pointerdown', (event) => beginFrameDrag(index, event));
+    root.addEventListener('click', () => {
+      // A drag ends with a click event too; that one isn't a selection.
+      if (justDragged) return;
+      selectFrame(index);
+    });
     filmstripEl.appendChild(root);
     return { root, thumb };
   });
   syncFilmstrip();
+}
+
+// --- reordering --------------------------------------------------------------
+
+const DRAG_THRESHOLD = 4; // px of travel before a click becomes a drag
+
+let dragFrom: number | null = null;
+let dragOrigin: { x: number; y: number } | null = null;
+/** Insertion slot in 0..frames.length, i.e. the gap the frame would land in. */
+let dragSlot: number | null = null;
+let dragging = false;
+let justDragged = false;
+
+function beginFrameDrag(index: number, event: PointerEvent): void {
+  if (event.button !== 0) return;
+  dragFrom = index;
+  dragOrigin = { x: event.clientX, y: event.clientY };
+  dragging = false;
+}
+
+/** Which gap the cursor sits in, by comparing against each thumbnail's midpoint. */
+function slotAt(clientX: number): number {
+  for (let i = 0; i < frameViews.length; i++) {
+    const rect = frameViews[i].root.getBoundingClientRect();
+    if (clientX < rect.left + rect.width / 2) return i;
+  }
+  return frameViews.length;
+}
+
+function paintDropHint(): void {
+  frameViews.forEach((view, index) => {
+    view.root.classList.toggle('dragging', dragging && index === dragFrom);
+    view.root.classList.toggle('drop-before', dragging && index === dragSlot);
+    view.root.classList.toggle(
+      'drop-after',
+      dragging && dragSlot === frameViews.length && index === frameViews.length - 1,
+    );
+  });
+}
+
+window.addEventListener('pointermove', (event) => {
+  if (dragFrom === null || dragOrigin === null) return;
+
+  if (!dragging) {
+    const travel = Math.hypot(event.clientX - dragOrigin.x, event.clientY - dragOrigin.y);
+    if (travel < DRAG_THRESHOLD) return;
+    dragging = true;
+    stopPlayback(false);
+    status('drop to reorder');
+  }
+
+  dragSlot = slotAt(event.clientX);
+  paintDropHint();
+});
+
+window.addEventListener('pointerup', () => {
+  if (dragFrom !== null && dragging && dragSlot !== null) {
+    moveFrame(dragFrom, dragSlot);
+    // Swallow the click this pointerup is about to produce.
+    justDragged = true;
+    setTimeout(() => (justDragged = false), 0);
+  }
+  endFrameDrag();
+});
+
+window.addEventListener('pointercancel', endFrameDrag);
+
+function endFrameDrag(): void {
+  dragFrom = null;
+  dragOrigin = null;
+  dragSlot = null;
+  dragging = false;
+  paintDropHint();
+}
+
+/** Moves a frame into an insertion slot, keeping history pointing at the art. */
+function moveFrame(from: number, slot: number): void {
+  // Removing the frame first shifts every later slot down by one.
+  const to = slot > from ? slot - 1 : slot;
+  if (to === from) return;
+
+  cancelPolygon();
+  finishRotation();
+
+  const [moved] = frames.splice(from, 1);
+  frames.splice(to, 0, moved);
+
+  remapHistory((frame) => {
+    if (frame === from) return to;
+    if (from < frame && frame <= to) return frame - 1;
+    if (to <= frame && frame < from) return frame + 1;
+    return frame;
+  });
+
+  buildFilmstrip();
+  showFrame(to);
+  persist();
+  status(`moved frame ${from + 1} to position ${to + 1}`);
 }
 
 function paintThumb(index: number): void {
@@ -877,13 +980,14 @@ el<HTMLButtonElement>('export').addEventListener('click', async () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  // Buttons included: Space would otherwise both press the focused button and
-  // toggle playback.
-  if (
-    event.target instanceof HTMLInputElement ||
-    event.target instanceof HTMLSelectElement ||
-    event.target instanceof HTMLButtonElement
-  ) {
+  // Typing in a field owns every key.
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+    return;
+  }
+
+  // A focused button owns only its activation keys — otherwise clicking any
+  // button would silently disable every shortcut until focus moved elsewhere.
+  if (event.target instanceof HTMLButtonElement && (event.key === ' ' || event.key === 'Enter')) {
     return;
   }
 

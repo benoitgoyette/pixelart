@@ -182,6 +182,7 @@ button.primary {
 }
 
 .frame-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -191,7 +192,33 @@ button.primary {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-raised);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+}
+
+.frame-item.dragging {
+  opacity: 0.35;
+  cursor: grabbing;
+}
+
+/* Insertion caret: which gap the frame would drop into. */
+.frame-item.drop-before::before,
+.frame-item.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.frame-item.drop-before::before {
+  left: -5px;
+}
+
+.frame-item.drop-after::after {
+  right: -5px;
 }
 
 .frame-item.current {

@@ -38,7 +38,10 @@ eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
 - Move between frames by clicking a thumbnail, scrolling the strip, or pressing
   `←` / `→`.
 - **Play** previews the animation in the canvas at 4–24 fps (`Space` toggles it).
-- **Delete** removes the current frame. Adding and deleting frames is not undoable.
+- Drag a thumbnail to reorder frames; a caret shows where it will land.
+- **Delete** removes the current frame. Adding, deleting, and reordering frames
+  are not themselves undoable, though reordering keeps the drawing history
+  pointing at the right frames.
 - All frames share one canvas size, so changing Size starts a fresh animation.
 - 16 / 32 / 64 / 128 canvases, 1–32× zoom, toggleable pixel grid.
 - Transparent by default, with an optional solid background for preview and export.
