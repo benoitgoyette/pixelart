@@ -1,6 +1,14 @@
 import { PixelDoc, RGBA, TRANSPARENT, linePoints, sameColor } from './canvas';
 
-export type ToolId = 'pencil' | 'eraser' | 'bucket' | 'eyedropper' | 'line' | 'rect' | 'oval';
+export type ToolId =
+  | 'pencil'
+  | 'eraser'
+  | 'bucket'
+  | 'eyedropper'
+  | 'line'
+  | 'rect'
+  | 'oval'
+  | 'polygon';
 
 /** Tools drawn by dragging out a preview and committing on release. */
 export type ShapeTool = Extract<ToolId, 'line' | 'rect' | 'oval'>;
@@ -18,6 +26,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'line', label: 'Line', icon: '╱', shortcut: 'l' },
   { id: 'rect', label: 'Rectangle', icon: '▭', shortcut: 'r' },
   { id: 'oval', label: 'Oval', icon: '◯', shortcut: 'o' },
+  { id: 'polygon', label: 'Polygon', icon: '⬠', shortcut: 'p' },
   { id: 'bucket', label: 'Fill', icon: '🪣', shortcut: 'g' },
   { id: 'eyedropper', label: 'Pick', icon: '💧', shortcut: 'i' },
 ];
@@ -41,7 +50,7 @@ export interface ToolContext {
 
 /** Whether a tool strokes with a brush, and so has a width to configure. */
 export function hasBrushSize(tool: ToolId): boolean {
-  return tool === 'pencil' || tool === 'eraser' || isShapeTool(tool);
+  return tool === 'pencil' || tool === 'eraser' || tool === 'polygon' || isShapeTool(tool);
 }
 
 export function isShapeTool(tool: ToolId): tool is ShapeTool {
@@ -49,7 +58,11 @@ export function isShapeTool(tool: ToolId): tool is ShapeTool {
 }
 
 /** Closed shapes have an interior to fill; a line doesn't. */
-export function hasShapeFill(tool: ToolId): tool is Extract<ShapeTool, 'rect' | 'oval'> {
+export function hasShapeFill(tool: ToolId): boolean {
+  return tool === 'rect' || tool === 'oval' || tool === 'polygon';
+}
+
+function isFillableShape(tool: ShapeTool): tool is Extract<ShapeTool, 'rect' | 'oval'> {
   return tool === 'rect' || tool === 'oval';
 }
 
@@ -96,8 +109,10 @@ export function applyTool(tool: ToolId, ctx: ToolContext, x: number, y: number):
     case 'line':
     case 'rect':
     case 'oval':
-      // Shapes are previewed across a drag and committed by the editor, not
-      // painted cell-by-cell here. See strokeShape().
+    case 'polygon':
+      // Shapes are previewed across a drag (or a click sequence, for the
+      // polygon) and committed by the editor, not painted cell-by-cell here.
+      // See strokeShape() and strokePolygon().
       break;
   }
 }
@@ -115,11 +130,88 @@ export function strokeShape(
   y1: number,
   fill: RGBA | null = null,
 ): void {
-  if (fill !== null && hasShapeFill(tool)) {
+  if (fill !== null && isFillableShape(tool)) {
     fillShape(tool, ctx.doc, x0, y0, x1, y1, fill);
   }
   for (const [x, y] of shapePoints(tool, x0, y0, x1, y1)) {
     stamp(ctx.doc, x, y, ctx.size, ctx.color);
+  }
+}
+
+/**
+ * Draws a polygon through `points`: interior first when it's closed and a fill
+ * was chosen, then every edge at the brush width. An open polygon draws the
+ * edges it has so far, which is what the in-progress preview wants.
+ */
+export function strokePolygon(
+  ctx: ToolContext,
+  points: Array<[number, number]>,
+  closed: boolean,
+  fill: RGBA | null = null,
+): void {
+  if (points.length === 0) return;
+
+  if (closed && fill !== null && points.length >= 3) {
+    fillPolygon(ctx.doc, points, fill);
+  }
+
+  // A lone vertex has no edge to stroke, so stamp it directly.
+  if (points.length === 1) {
+    stamp(ctx.doc, points[0][0], points[0][1], ctx.size, ctx.color);
+    return;
+  }
+
+  const edges = closed ? points.length : points.length - 1;
+  for (let i = 0; i < edges; i++) {
+    const [x0, y0] = points[i];
+    const [x1, y1] = points[(i + 1) % points.length];
+    for (const [x, y] of linePoints(x0, y0, x1, y1)) {
+      stamp(ctx.doc, x, y, ctx.size, ctx.color);
+    }
+  }
+}
+
+/**
+ * Scanline fill with the even-odd rule: for each row, find where the edges cross
+ * it and fill between alternating pairs. Handles concave and self-intersecting
+ * outlines, which a flood fill from an interior seed could not.
+ */
+export function fillPolygon(
+  doc: PixelDoc,
+  points: Array<[number, number]>,
+  color: RGBA,
+): void {
+  if (points.length < 3) return;
+
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const [, y] of points) {
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  minY = Math.max(0, Math.ceil(minY));
+  maxY = Math.min(doc.height - 1, Math.floor(maxY));
+
+  const crossings: number[] = [];
+  for (let y = minY; y <= maxY; y++) {
+    crossings.length = 0;
+
+    for (let i = 0; i < points.length; i++) {
+      const [x0, y0] = points[i];
+      const [x1, y1] = points[(i + 1) % points.length];
+      // Half-open test: counts each vertex once and ignores horizontal edges,
+      // so spans can't double-count and flip the inside/outside parity.
+      if ((y0 <= y && y1 > y) || (y1 <= y && y0 > y)) {
+        crossings.push(x0 + ((y - y0) / (y1 - y0)) * (x1 - x0));
+      }
+    }
+
+    crossings.sort((a, b) => a - b);
+    for (let i = 0; i + 1 < crossings.length; i += 2) {
+      const from = Math.ceil(crossings[i]);
+      const to = Math.floor(crossings[i + 1]);
+      for (let x = from; x <= to; x++) doc.set(x, y, color);
+    }
   }
 }
 

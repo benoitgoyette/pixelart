@@ -1,4 +1,4 @@
-import { PixelDoc, RGBA, Renderer, linePoints, toPngBlob } from './canvas';
+import { PixelDoc, RGBA, Renderer, linePoints, rotate, toPngBlob } from './canvas';
 import { DEFAULT_PALETTE, hexToRgba, rgbaToCss, rgbaToHex } from './palette';
 import {
   BRUSH_SIZES,
@@ -11,6 +11,7 @@ import {
   isBrushSize,
   isDestructive,
   isShapeTool,
+  strokePolygon,
   strokeShape,
 } from './tools';
 
@@ -33,6 +34,8 @@ const sizeSelect = el<HTMLSelectElement>('doc-size');
 const gridToggle = el<HTMLInputElement>('show-grid');
 const zoomInput = el<HTMLInputElement>('zoom');
 const zoomValue = el<HTMLSpanElement>('zoom-value');
+const rotateInput = el<HTMLInputElement>('rotate');
+const rotateValue = el<HTMLSpanElement>('rotate-value');
 const statusEl = el<HTMLSpanElement>('status');
 const exportScale = el<HTMLSelectElement>('export-scale');
 const backgroundSelect = el<HTMLSelectElement>('background');
@@ -68,6 +71,11 @@ const undoStack: Uint8ClampedArray[] = [];
 const redoStack: Uint8ClampedArray[] = [];
 let strokeOpen = false;
 let lastCell: [number, number] | null = null;
+/** Vertices placed so far, and the pixels underneath them. Empty when idle. */
+let polygonPoints: Array<[number, number]> = [];
+let polygonBase: Uint8ClampedArray | null = null;
+/** Pixels as they stood before the pending rotation; null when none is pending. */
+let rotateBase: Uint8ClampedArray | null = null;
 /** Where a shape drag started, and the canvas to redraw it against each move. */
 let shapeOrigin: [number, number] | null = null;
 let shapeBase: Uint8ClampedArray | null = null;
@@ -90,7 +98,17 @@ function endStroke(): void {
   persist();
 }
 
+/** Throws away the open stroke's undo entry — for edits abandoned, not applied. */
+function discardStroke(): void {
+  if (!strokeOpen) return;
+  undoStack.pop();
+  strokeOpen = false;
+}
+
 function undo(): void {
+  // Mid-polygon, undo means "drop the polygon" rather than reaching past it.
+  if (polygonBase !== null) return cancelPolygon();
+  finishRotation();
   const previous = undoStack.pop();
   if (!previous) return status('nothing to undo');
   redoStack.push(doc.snapshot());
@@ -100,6 +118,8 @@ function undo(): void {
 }
 
 function redo(): void {
+  cancelPolygon();
+  finishRotation();
   const next = redoStack.pop();
   if (!next) return status('nothing to redo');
   undoStack.push(doc.snapshot());
@@ -163,9 +183,99 @@ function previewShape(x: number, y: number): void {
   status(`${tool} ${Math.abs(cx - ox) + 1} × ${Math.abs(cy - oy) + 1}`);
 }
 
+function samePoint(a: [number, number], b: [number, number]): boolean {
+  return a[0] === b[0] && a[1] === b[1];
+}
+
+/**
+ * Redraws the in-progress polygon: the edges placed so far plus a rubber band to
+ * the cursor. Hovering the start point previews the finished shape instead —
+ * fill included — so what you see is what clicking commits.
+ */
+function previewPolygon(cursor: [number, number] | null): void {
+  if (polygonBase === null || polygonPoints.length === 0) return;
+  doc.restore(polygonBase);
+
+  const closing =
+    cursor !== null && samePoint(cursor, polygonPoints[0]) && polygonPoints.length >= 3;
+
+  if (closing) {
+    strokePolygon(toolContext, polygonPoints, true, shapeFill());
+  } else {
+    strokePolygon(toolContext, cursor === null ? polygonPoints : [...polygonPoints, cursor], false);
+  }
+
+  render();
+  status(
+    closing
+      ? 'click to close the polygon'
+      : `polygon: ${polygonPoints.length} point${polygonPoints.length === 1 ? '' : 's'} — click the ringed start point to close`,
+  );
+}
+
+function addPolygonPoint(x: number, y: number): void {
+  const point = clampToDoc(x, y);
+
+  if (polygonPoints.length === 0) {
+    beginStroke();
+    polygonBase = doc.snapshot();
+    polygonPoints = [point];
+    previewPolygon(point);
+    return;
+  }
+
+  if (samePoint(point, polygonPoints[0])) {
+    if (polygonPoints.length < 3) return status('a polygon needs at least 3 points to close');
+    closePolygon();
+    return;
+  }
+
+  // A repeat click on the vertex just placed would add a zero-length edge.
+  if (samePoint(point, polygonPoints[polygonPoints.length - 1])) return;
+
+  polygonPoints.push(point);
+  previewPolygon(point);
+}
+
+function closePolygon(): void {
+  if (polygonBase === null || polygonPoints.length < 3) return;
+  const count = polygonPoints.length;
+
+  doc.restore(polygonBase);
+  strokePolygon(toolContext, polygonPoints, true, shapeFill());
+  polygonPoints = [];
+  polygonBase = null;
+
+  render();
+  endStroke();
+  status(`polygon closed (${count} points)`);
+}
+
+/** Abandons an unfinished polygon, along with the undo entry it opened. */
+function cancelPolygon(): void {
+  if (polygonBase === null) return;
+  doc.restore(polygonBase);
+  polygonPoints = [];
+  polygonBase = null;
+  discardStroke();
+  render();
+  persist();
+  status('polygon cancelled');
+}
+
 canvas.addEventListener('pointerdown', (event) => {
   canvas.setPointerCapture(event.pointerId);
+  // Painting banks any rotation still on the slider, so the two never share an
+  // undo entry.
+  finishRotation();
   const [x, y] = cellFromEvent(event);
+
+  // The polygon spans a click sequence, so it manages its own stroke.
+  if (tool === 'polygon') {
+    addPolygonPoint(x, y);
+    return;
+  }
+
   if (isDestructive(tool)) beginStroke();
 
   if (isShapeTool(tool)) {
@@ -181,6 +291,11 @@ canvas.addEventListener('pointerdown', (event) => {
 
 canvas.addEventListener('pointermove', (event) => {
   const [x, y] = cellFromEvent(event);
+
+  if (polygonBase !== null) {
+    previewPolygon(clampToDoc(x, y));
+    return;
+  }
 
   if (shapeOrigin !== null) {
     previewShape(x, y);
@@ -205,6 +320,8 @@ function releasePointer(): void {
   lastCell = null;
   shapeOrigin = null;
   shapeBase = null;
+  // A pending polygon outlives the pointer, so its stroke stays open.
+  if (polygonBase !== null) return;
   endStroke();
 }
 
@@ -245,6 +362,7 @@ function syncTools(): void {
 }
 
 function setTool(next: ToolId): void {
+  if (next !== tool) cancelPolygon();
   tool = next;
   syncTools();
   const size = toolContext.size;
@@ -323,6 +441,8 @@ function setColor(next: RGBA): void {
 }
 
 function setDocSize(size: number): void {
+  cancelPolygon();
+  finishRotation();
   doc = new PixelDoc(size, size);
   undoStack.length = 0;
   redoStack.length = 0;
@@ -382,6 +502,48 @@ gridToggle.addEventListener('change', () => {
   render();
 });
 
+/**
+ * Applies `angle` to the pixels as they were before this rotation began, so
+ * scrubbing the slider re-rotates the original rather than compounding the
+ * resampling of whatever the last frame produced.
+ */
+function previewRotation(angle: number): void {
+  cancelPolygon();
+  if (rotateBase === null) {
+    beginStroke();
+    rotateBase = doc.snapshot();
+  }
+  doc.data.set(rotate(new PixelDoc(doc.width, doc.height, rotateBase), angle).data);
+  rotateValue.textContent = `${angle}°`;
+  render();
+  status(`rotated ${angle}°`);
+}
+
+/**
+ * Banks a pending rotation: the art keeps it and the slider returns to zero, so
+ * the next drag starts from the rotated art. A no-op when nothing is pending.
+ */
+function finishRotation(): void {
+  if (rotateBase === null) return;
+  rotateBase = null;
+  rotateInput.value = '0';
+  rotateValue.textContent = '0°';
+  endStroke();
+}
+
+rotateInput.addEventListener('input', () => previewRotation(Number(rotateInput.value)));
+// Held open through the whole scrub (pointer and keyboard alike) and banked when
+// focus leaves, so a slider still mid-adjustment never compounds.
+rotateInput.addEventListener('blur', finishRotation);
+
+for (const button of document.querySelectorAll<HTMLButtonElement>('.rotate-presets button')) {
+  button.addEventListener('click', () => {
+    finishRotation();
+    previewRotation(Number(button.dataset.angle));
+    finishRotation();
+  });
+}
+
 zoomInput.addEventListener('input', () => {
   zoom = Number(zoomInput.value);
   zoomValue.textContent = `${zoom}×`;
@@ -403,6 +565,8 @@ el<HTMLButtonElement>('redo').addEventListener('click', redo);
 
 el<HTMLButtonElement>('clear').addEventListener('click', () => {
   if (!confirm('Clear the canvas?')) return;
+  cancelPolygon();
+  finishRotation();
   beginStroke();
   doc.clear();
   endStroke();
@@ -477,6 +641,19 @@ el<HTMLButtonElement>('export').addEventListener('click', async () => {
 
 window.addEventListener('keydown', (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+
+  if (event.key === 'Escape' && polygonBase !== null) {
+    event.preventDefault();
+    cancelPolygon();
+    return;
+  }
+
+  if (event.key === 'Enter' && polygonBase !== null) {
+    event.preventDefault();
+    if (polygonPoints.length < 3) return status('a polygon needs at least 3 points to close');
+    closePolygon();
+    return;
+  }
 
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault();
@@ -573,7 +750,12 @@ function loadDoc(): PixelDoc | null {
 // --- boot --------------------------------------------------------------------
 
 function render(): void {
-  renderer.render(doc, { zoom, showGrid, background });
+  renderer.render(doc, {
+    zoom,
+    showGrid,
+    background,
+    marker: polygonPoints.length > 0 ? polygonPoints[0] : null,
+  });
 }
 
 function status(message: string): void {

@@ -13,13 +13,20 @@ npm run build    # static bundle in dist/
 
 ## Features
 
-**Tools** — pencil, eraser, line, rectangle, oval, flood fill, and eyedropper.
-Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle, `O` oval,
-`G` fill, `I` eyedropper.
+**Tools** — pencil, eraser, line, rectangle, oval, polygon, flood fill, and
+eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
+`O` oval, `P` polygon, `G` fill, `I` eyedropper.
 
 - Pencil and eraser have independent 1×1 / 3×3 / 5×5 widths.
 - Shapes preview live across a drag and commit on release, as one undo step.
-- Rectangle and oval can be filled with the brush color or a separate custom color.
+- The polygon places a vertex per click; click the ringed start point (or press
+  `Enter`) to close it, `Esc` to abandon it. The whole sequence is one undo step.
+- Rectangle, oval, and polygon can be filled with the brush color or a separate
+  custom color. Polygon interiors use an even-odd scanline fill, so concave
+  outlines fill correctly.
+- Rotate the canvas 0–359° about its center, with 90/180/270 presets. Right
+  angles are lossless; other angles resample nearest-neighbor and clip the
+  corners swept outside.
 - Undo/redo (`⌘Z` / `⇧⌘Z`), 100 steps deep, one entry per stroke.
 - 16 / 32 / 64 / 128 canvases, 1–32× zoom, toggleable pixel grid.
 - Transparent by default, with an optional solid background for preview and export.

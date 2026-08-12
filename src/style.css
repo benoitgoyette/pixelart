@@ -281,6 +281,16 @@ select {
   color: var(--text);
 }
 
+.rotate-presets {
+  display: flex;
+  gap: 6px;
+}
+
+.rotate-presets button {
+  flex: 1;
+  padding: 5px 0;
+}
+
 /* save dialog */
 
 .save-dialog {

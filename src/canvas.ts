@@ -88,6 +88,57 @@ export function linePoints(
   return points;
 }
 
+/**
+ * Rotates the document clockwise about its center into a new doc of the same
+ * size, sampling nearest-neighbor so no new colors appear. Corners swept outside
+ * the canvas are clipped; area swept in is transparent.
+ *
+ * Right angles use exact index permutations rather than trigonometry, so 90°,
+ * 180°, and 270° are lossless and perfectly reversible.
+ */
+export function rotate(source: PixelDoc, degrees: number): PixelDoc {
+  const angle = ((Math.round(degrees) % 360) + 360) % 360;
+  const w = source.width;
+  const h = source.height;
+  const out = new PixelDoc(w, h);
+
+  if (angle === 0) {
+    out.data.set(source.data);
+    return out;
+  }
+
+  const square = w === h;
+  if (angle === 180 || (square && (angle === 90 || angle === 270))) {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const sx = angle === 90 ? y : angle === 180 ? w - 1 - x : w - 1 - y;
+        const sy = angle === 90 ? h - 1 - x : angle === 180 ? h - 1 - y : x;
+        out.set(x, y, source.get(sx, sy));
+      }
+    }
+    return out;
+  }
+
+  // Inverse mapping: walk destination pixels and pull from the source, which
+  // leaves no unwritten holes the way a forward scatter would.
+  const rad = (angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const cx = (w - 1) / 2;
+  const cy = (h - 1) / 2;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const sx = Math.round(cx + dx * cos + dy * sin);
+      const sy = Math.round(cy - dx * sin + dy * cos);
+      if (source.contains(sx, sy)) out.set(x, y, source.get(sx, sy));
+    }
+  }
+  return out;
+}
+
 const CHECKER_LIGHT = '#3a3a42';
 const CHECKER_DARK = '#31313a';
 const CHECKER_SIZE = 8; // screen pixels
@@ -97,6 +148,8 @@ export interface RenderOptions {
   showGrid: boolean;
   /** CSS color painted behind the art, or null to keep it transparent. */
   background: string | null;
+  /** Cell to ring as an interaction hint (the polygon's closing point). */
+  marker?: [number, number] | null;
 }
 
 /**
@@ -114,7 +167,7 @@ export class Renderer {
     this.scratchCtx = require2d(this.scratch);
   }
 
-  render(doc: PixelDoc, { zoom, showGrid, background }: RenderOptions): void {
+  render(doc: PixelDoc, { zoom, showGrid, background, marker }: RenderOptions): void {
     const w = doc.width * zoom;
     const h = doc.height * zoom;
 
@@ -132,6 +185,21 @@ export class Renderer {
     }
     this.drawPixels(doc, w, h);
     if (showGrid && zoom >= 6) this.drawGrid(doc, zoom, w, h);
+    if (marker) this.drawMarker(marker, zoom);
+  }
+
+  /** An overlay ring — screen-space only, so it never touches pixel data. */
+  private drawMarker([mx, my]: [number, number], zoom: number): void {
+    const ctx = this.ctx;
+    const inset = Math.max(1, Math.round(zoom / 8));
+    ctx.lineWidth = Math.max(1, Math.round(zoom / 6));
+    ctx.strokeStyle = '#41a6f6';
+    ctx.strokeRect(
+      mx * zoom - inset + 0.5,
+      my * zoom - inset + 0.5,
+      zoom + inset * 2 - 1,
+      zoom + inset * 2 - 1,
+    );
   }
 
   private drawCheckerboard(w: number, h: number): void {

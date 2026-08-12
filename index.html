@@ -98,6 +98,23 @@
               <input type="range" id="zoom" min="1" max="32" value="12" />
             </label>
           </section>
+
+          <section>
+            <h2>Rotate</h2>
+            <label class="field">
+              Angle <span class="zoom-value" id="rotate-value">0°</span>
+              <input type="range" id="rotate" min="0" max="359" value="0" />
+            </label>
+            <div class="rotate-presets">
+              <button type="button" data-angle="90">90°</button>
+              <button type="button" data-angle="180">180°</button>
+              <button type="button" data-angle="270">270°</button>
+            </div>
+            <p class="hint">
+              Turns the whole canvas about its center. Right angles are lossless;
+              other angles resample, and corners swept outside are clipped.
+            </p>
+          </section>
         </aside>
 
         <main class="stage" id="stage">
