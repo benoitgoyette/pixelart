@@ -1,8 +1,10 @@
 :root {
   --bg: #16161a;
-  --panel: #1e1e24;
-  --panel-raised: #26262e;
-  --border: #33333d;
+  /* Panel chrome: toolbar, sidebar, filmstrip, dialogs. */
+  --panel: rgb(33, 23, 33);
+  /* Controls sitting on a panel — the same hue, lifted so they read as raised. */
+  --panel-raised: rgb(46, 33, 46);
+  --border: rgb(62, 46, 62);
   --text: #e8e8ec;
   --text-dim: #9a9aa6;
   --accent: #41a6f6;
