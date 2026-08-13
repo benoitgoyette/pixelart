@@ -150,6 +150,15 @@ export interface RenderOptions {
   background: string | null;
   /** Cell to ring as an interaction hint (the polygon's closing point). */
   marker?: [number, number] | null;
+  /** Marquee drawn over the art, in art-pixel coordinates. */
+  selection?: Rect | null;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /**
@@ -167,7 +176,7 @@ export class Renderer {
     this.scratchCtx = require2d(this.scratch);
   }
 
-  render(doc: PixelDoc, { zoom, showGrid, background, marker }: RenderOptions): void {
+  render(doc: PixelDoc, { zoom, showGrid, background, marker, selection }: RenderOptions): void {
     const w = doc.width * zoom;
     const h = doc.height * zoom;
 
@@ -186,6 +195,26 @@ export class Renderer {
     this.drawPixels(doc, w, h);
     if (showGrid && zoom >= 6) this.drawGrid(doc, zoom, w, h);
     if (marker) this.drawMarker(marker, zoom);
+    if (selection) this.drawSelection(selection, zoom);
+  }
+
+  /** Marching-ants style marquee — an overlay, never part of the art. */
+  private drawSelection(rect: Rect, zoom: number): void {
+    const ctx = this.ctx;
+    const x = rect.x * zoom;
+    const y = rect.y * zoom;
+    const w = rect.w * zoom;
+    const h = rect.h * zoom;
+
+    ctx.save();
+    // A dark underlay keeps the dashes readable over light and dark art alike.
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = '#41a6f6';
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.restore();
   }
 
   /** An overlay ring — screen-space only, so it never touches pixel data. */

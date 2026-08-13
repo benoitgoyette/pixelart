@@ -226,6 +226,39 @@
       </form>
     </dialog>
 
+    <dialog id="copy-dialog" class="save-dialog">
+      <h2>Copy selection</h2>
+      <p class="hint" id="copy-summary"></p>
+
+      <label class="field" for="copy-mode">
+        Copy to
+        <select id="copy-mode">
+          <option value="single" selected>A single frame</option>
+          <option value="range">A range of frames</option>
+          <option value="all">All frames</option>
+        </select>
+      </label>
+
+      <div class="field" id="copy-single-row">
+        <label for="copy-frame">Frame</label>
+        <select id="copy-frame"></select>
+      </div>
+
+      <div class="field" id="copy-range-row" hidden>
+        <label for="copy-from">Frames</label>
+        <div class="range-row">
+          <select id="copy-from"></select>
+          <span>to</span>
+          <select id="copy-to"></select>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="copy-cancel">Cancel</button>
+        <button type="button" id="copy-confirm" class="primary">Copy</button>
+      </div>
+    </dialog>
+
     <dialog id="unsaved-dialog" class="save-dialog">
       <h2>Unsaved changes</h2>
       <p class="hint" id="unsaved-message"></p>

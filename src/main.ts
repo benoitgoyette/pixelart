@@ -2,6 +2,7 @@ import {
   MAX_SHEET_PX,
   PixelDoc,
   RGBA,
+  Rect,
   Renderer,
   linePoints,
   rotate,
@@ -74,6 +75,14 @@ const saveHint = el<HTMLParagraphElement>('save-hint');
 const saveTitle = el<HTMLHeadingElement>('save-title');
 const saveLabel = el<HTMLLabelElement>('save-label');
 const saveSuffix = el<HTMLSpanElement>('save-suffix');
+const copyDialog = el<HTMLDialogElement>('copy-dialog');
+const copySummary = el<HTMLParagraphElement>('copy-summary');
+const copyMode = el<HTMLSelectElement>('copy-mode');
+const copyFrame = el<HTMLSelectElement>('copy-frame');
+const copyFrom = el<HTMLSelectElement>('copy-from');
+const copyTo = el<HTMLSelectElement>('copy-to');
+const copySingleRow = el<HTMLDivElement>('copy-single-row');
+const copyRangeRow = el<HTMLDivElement>('copy-range-row');
 const unsavedDialog = el<HTMLDialogElement>('unsaved-dialog');
 const unsavedMessage = el<HTMLParagraphElement>('unsaved-message');
 const libraryDialog = el<HTMLDialogElement>('library-dialog');
@@ -109,11 +118,15 @@ let lastFilename = '';
 let pencilSize: BrushSize = 1;
 let eraserSize: BrushSize = 1;
 
-/** History spans frames, so each entry records which one it belongs to. */
-interface Snapshot {
+/**
+ * History spans frames, so each entry records which ones it covers. A stroke
+ * touches one; a copy into a range touches several and still undoes as a unit.
+ */
+interface FrameSnapshot {
   frame: number;
   data: Uint8ClampedArray;
 }
+type Snapshot = FrameSnapshot[];
 
 const undoStack: Snapshot[] = [];
 const redoStack: Snapshot[] = [];
@@ -124,6 +137,9 @@ let polygonPoints: Array<[number, number]> = [];
 let polygonBase: Uint8ClampedArray | null = null;
 /** Pixels as they stood before the pending rotation; null when none is pending. */
 let rotateBase: Uint8ClampedArray | null = null;
+/** Marquee from the select tool, in art pixels, and the corner it started at. */
+let selection: Rect | null = null;
+let selectOrigin: [number, number] | null = null;
 /** Where a shape drag started, and the canvas to redraw it against each move. */
 let shapeOrigin: [number, number] | null = null;
 let shapeBase: Uint8ClampedArray | null = null;
@@ -132,11 +148,23 @@ sizeSelect.value = String(doc.width);
 
 // --- history -----------------------------------------------------------------
 
-function beginStroke(): void {
-  if (strokeOpen) return;
-  undoStack.push({ frame: frameIndex, data: doc.snapshot() });
+function captureFrames(indices: number[]): Snapshot {
+  return indices.map((frame) => ({ frame, data: frames[frame].snapshot() }));
+}
+
+function restoreSnapshot(entry: Snapshot): void {
+  for (const item of entry) frames[item.frame].restore(item.data);
+}
+
+function pushHistory(entry: Snapshot): void {
+  undoStack.push(entry);
   if (undoStack.length > MAX_HISTORY) undoStack.shift();
   redoStack.length = 0;
+}
+
+function beginStroke(): void {
+  if (strokeOpen) return;
+  pushHistory(captureFrames([frameIndex]));
   strokeOpen = true;
 }
 
@@ -160,12 +188,13 @@ function undo(): void {
   finishRotation();
   const previous = undoStack.pop();
   if (!previous) return status('nothing to undo');
+
+  redoStack.push(captureFrames(previous.map((item) => item.frame)));
+  restoreSnapshot(previous);
   // Follow the edit back to the frame it happened on.
-  if (previous.frame !== frameIndex) showFrame(previous.frame);
-  redoStack.push({ frame: frameIndex, data: doc.snapshot() });
-  doc.restore(previous.data);
-  render();
+  showFrame(previous[0].frame);
   persist();
+  if (previous.length > 1) status(`undid a change across ${previous.length} frames`);
 }
 
 function redo(): void {
@@ -174,10 +203,10 @@ function redo(): void {
   finishRotation();
   const next = redoStack.pop();
   if (!next) return status('nothing to redo');
-  if (next.frame !== frameIndex) showFrame(next.frame);
-  undoStack.push({ frame: frameIndex, data: doc.snapshot() });
-  doc.restore(next.data);
-  render();
+
+  undoStack.push(captureFrames(next.map((item) => item.frame)));
+  restoreSnapshot(next);
+  showFrame(next[0].frame);
   persist();
 }
 
@@ -188,9 +217,14 @@ function redo(): void {
 function remapHistory(remap: (frame: number) => number | null): void {
   for (const stack of [undoStack, redoStack]) {
     for (let i = stack.length - 1; i >= 0; i--) {
-      const next = remap(stack[i].frame);
-      if (next === null) stack.splice(i, 1);
-      else stack[i].frame = next;
+      const mapped: Snapshot = [];
+      for (const item of stack[i]) {
+        const next = remap(item.frame);
+        if (next !== null) mapped.push({ frame: next, data: item.data });
+      }
+      // An entry covering only deleted frames has nothing left to restore.
+      if (mapped.length === 0) stack.splice(i, 1);
+      else stack[i] = mapped;
     }
   }
 }
@@ -215,6 +249,7 @@ function selectFrame(index: number): void {
   // Pending edits belong to the frame that started them.
   cancelPolygon();
   finishRotation();
+  clearSelection();
   showFrame(index);
   status(`frame ${frameIndex + 1} of ${frames.length}`);
 }
@@ -485,6 +520,7 @@ async function newDrawing(): Promise<void> {
     return status('new drawing cancelled');
   }
 
+  clearSelection();
   frames = [new PixelDoc(doc.width, doc.height)];
   undoStack.length = 0;
   redoStack.length = 0;
@@ -520,6 +556,7 @@ async function loadFromLibrary(entry: SavedAnimation): Promise<boolean> {
   cancelPolygon();
   finishRotation();
 
+  clearSelection();
   frames = loaded;
   undoStack.length = 0;
   redoStack.length = 0;
@@ -791,6 +828,119 @@ function previewShape(x: number, y: number): void {
   status(`${tool} ${Math.abs(cx - ox) + 1} × ${Math.abs(cy - oy) + 1}`);
 }
 
+// --- selection ---------------------------------------------------------------
+
+function clearSelection(): void {
+  if (selection === null && selectOrigin === null) return;
+  selection = null;
+  selectOrigin = null;
+  render();
+}
+
+/** The marquee spanning the drag, in whole cells and clamped to the canvas. */
+function selectionBetween(a: [number, number], b: [number, number]): Rect {
+  const [ax, ay] = clampToDoc(a[0], a[1]);
+  const [bx, by] = clampToDoc(b[0], b[1]);
+  return {
+    x: Math.min(ax, bx),
+    y: Math.min(ay, by),
+    w: Math.abs(bx - ax) + 1,
+    h: Math.abs(by - ay) + 1,
+  };
+}
+
+function frameOptions(select: HTMLSelectElement, chosen: number): void {
+  select.textContent = '';
+  frames.forEach((_, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = index === frameIndex ? `Frame ${index + 1} (current)` : `Frame ${index + 1}`;
+    select.appendChild(option);
+  });
+  select.value = String(Math.min(Math.max(chosen, 0), frames.length - 1));
+}
+
+function syncCopyMode(): void {
+  copySingleRow.hidden = copyMode.value !== 'single';
+  copyRangeRow.hidden = copyMode.value !== 'range';
+}
+
+function openCopyDialog(): void {
+  if (selection === null) return;
+  const { w, h } = selection;
+
+  copySummary.textContent =
+    `${w} × ${h} px from frame ${frameIndex + 1}. ` +
+    'The region replaces the same area in each target, transparency included.';
+
+  // Default to the next frame — copying onto the source alone does nothing.
+  frameOptions(copyFrame, Math.min(frameIndex + 1, frames.length - 1));
+  frameOptions(copyFrom, 0);
+  frameOptions(copyTo, frames.length - 1);
+  copyMode.value = frames.length === 1 ? 'single' : copyMode.value;
+  syncCopyMode();
+  copyDialog.showModal();
+}
+
+function targetsFromDialog(): number[] {
+  if (copyMode.value === 'all') return frames.map((_, index) => index);
+  if (copyMode.value === 'single') return [Number(copyFrame.value)];
+
+  // Accept the range either way round rather than rejecting it.
+  const from = Number(copyFrom.value);
+  const to = Number(copyTo.value);
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+  const range: number[] = [];
+  for (let index = lo; index <= hi; index++) range.push(index);
+  return range;
+}
+
+/** Copies the marked region into every target frame, as one undo entry. */
+function copySelectionTo(targets: number[]): void {
+  if (selection === null) return;
+  const { x, y, w, h } = selection;
+  const source = doc;
+
+  // Copying onto the source frame is a no-op, so it never counts as a target.
+  const affected = [...new Set(targets)].filter(
+    (index) => index !== frameIndex && index >= 0 && index < frames.length,
+  );
+  if (affected.length === 0) {
+    return status('pick a frame other than this one to copy into');
+  }
+
+  pushHistory(captureFrames(affected));
+
+  for (const index of affected) {
+    const target = frames[index];
+    for (let row = y; row < y + h; row++) {
+      for (let column = x; column < x + w; column++) {
+        target.set(column, row, source.get(column, row));
+      }
+    }
+  }
+
+  syncFilmstrip();
+  render();
+  persist();
+  status(
+    affected.length === 1
+      ? `copied ${w} × ${h} region into frame ${affected[0] + 1}`
+      : `copied ${w} × ${h} region into ${affected.length} frames`,
+  );
+}
+
+copyMode.addEventListener('change', syncCopyMode);
+el<HTMLButtonElement>('copy-cancel').addEventListener('click', () => {
+  copyDialog.close();
+  status('copy cancelled');
+});
+el<HTMLButtonElement>('copy-confirm').addEventListener('click', () => {
+  copyDialog.close();
+  copySelectionTo(targetsFromDialog());
+});
+
 function samePoint(a: [number, number], b: [number, number]): boolean {
   return a[0] === b[0] && a[1] === b[1];
 }
@@ -888,6 +1038,13 @@ canvas.addEventListener('pointerdown', (event) => {
     return;
   }
 
+  if (tool === 'select') {
+    selectOrigin = clampToDoc(x, y);
+    selection = selectionBetween(selectOrigin, selectOrigin);
+    render();
+    return;
+  }
+
   if (isDestructive(tool)) beginStroke();
 
   if (isShapeTool(tool)) {
@@ -903,6 +1060,13 @@ canvas.addEventListener('pointerdown', (event) => {
 
 canvas.addEventListener('pointermove', (event) => {
   const [x, y] = cellFromEvent(event);
+
+  if (selectOrigin !== null) {
+    selection = selectionBetween(selectOrigin, [x, y]);
+    render();
+    status(`selection ${selection.w} × ${selection.h}`);
+    return;
+  }
 
   if (polygonBase !== null) {
     previewPolygon(clampToDoc(x, y));
@@ -932,6 +1096,13 @@ function releasePointer(): void {
   lastCell = null;
   shapeOrigin = null;
   shapeBase = null;
+
+  // Releasing a marquee is what asks where to copy it.
+  if (selectOrigin !== null) {
+    selectOrigin = null;
+    if (selection !== null) openCopyDialog();
+    return;
+  }
   // A pending polygon outlives the pointer, so its stroke stays open.
   if (polygonBase !== null) return;
   endStroke();
@@ -974,7 +1145,10 @@ function syncTools(): void {
 }
 
 function setTool(next: ToolId): void {
-  if (next !== tool) cancelPolygon();
+  if (next !== tool) {
+    cancelPolygon();
+    clearSelection();
+  }
   tool = next;
   syncTools();
   const size = toolContext.size;
@@ -1056,6 +1230,7 @@ function setDocSize(size: number): void {
   stopPlayback(false);
   cancelPolygon();
   finishRotation();
+  clearSelection();
   // Frames share one canvas size, so resizing starts a fresh animation.
   frames = [new PixelDoc(size, size)];
   undoStack.length = 0;
@@ -1359,6 +1534,13 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  if (event.key === 'Escape' && selection !== null) {
+    event.preventDefault();
+    clearSelection();
+    status('selection cleared');
+    return;
+  }
+
   if (event.key === 'Enter' && polygonBase !== null) {
     event.preventDefault();
     if (polygonPoints.length < 3) return status('a polygon needs at least 3 points to close');
@@ -1509,6 +1691,7 @@ function render(): void {
     showGrid,
     background,
     marker: polygonPoints.length > 0 ? polygonPoints[0] : null,
+    selection,
   });
 }
 

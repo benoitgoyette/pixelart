@@ -14,9 +14,10 @@ npm run build    # static bundle in dist/
 
 ## Features
 
-**Tools** — pencil, eraser, line, rectangle, oval, polygon, flood fill, and
-eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
-`O` oval, `P` polygon, `G` fill, `I` eyedropper.
+**Tools** — pencil, eraser, line, rectangle, oval, polygon, flood fill,
+eyedropper, and rectangular select. Keyboard shortcuts: `B` pencil, `E` eraser,
+`L` line, `R` rectangle, `O` oval, `P` polygon, `G` fill, `I` eyedropper,
+`M` select.
 
 - Pencil and eraser have independent 1×1 / 3×3 / 5×5 widths.
 - Shapes preview live across a drag and commit on release, as one undo step.
@@ -39,6 +40,9 @@ eyedropper. Keyboard shortcuts: `B` pencil, `E` eraser, `L` line, `R` rectangle,
   `←` / `→`.
 - **Play** previews the animation in the canvas at 4–24 fps (`Space` toggles it).
 - Drag a thumbnail to reorder frames; a caret shows where it will land.
+- The **select** tool marks a rectangle and, on release, offers to copy it into a
+  single frame, a range, or all of them — landing at the same coordinates and
+  replacing that area, transparency included. The copy is a single undo step.
 - **Delete** removes the current frame. Adding, deleting, and reordering frames
   are not themselves undoable, though reordering keeps the drawing history
   pointing at the right frames.
