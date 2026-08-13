@@ -1,3 +1,11 @@
+/*
+ * pixelart — a browser-based pixel art editor
+ * Copyright (C) 2026 Benoit Goyette
+ *
+ * Free software under the GNU General Public License v3 or later, without any
+ * warranty. See the LICENSE file at the root of this repository.
+ */
+
 /** RGBA color, each channel 0-255. */
 export type RGBA = [number, number, number, number];
 

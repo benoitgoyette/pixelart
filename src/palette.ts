@@ -1,3 +1,11 @@
+/*
+ * pixelart — a browser-based pixel art editor
+ * Copyright (C) 2026 Benoit Goyette
+ *
+ * Free software under the GNU General Public License v3 or later, without any
+ * warranty. See the LICENSE file at the root of this repository.
+ */
+
 import { RGBA } from './canvas';
 
 /** A compact 16-color starter palette (Sweetie-16 style ramp). */

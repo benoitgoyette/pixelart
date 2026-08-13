@@ -130,10 +130,30 @@ index.html        toolbar, sidebar, canvas stage, filmstrip, save dialog
 src/main.ts       wiring: input, frames, history, persistence, UI state
 src/canvas.ts     PixelDoc (RGBA buffer), Renderer, PNG export
 src/tools.ts      tool definitions, brush stamping, flood fill, shape geometry
-src/palette.ts    default palette and color conversion
+src/import.ts     image decoding, downsampling to the grid, palette snapping
+src/library.ts    saved animations in localStorage
+src/palette.ts    default palette, color conversion, nearest-palette matching
 src/style.css
+LICENSE           GNU General Public License v3
 ```
 
 Each frame is a flat `Uint8ClampedArray` of RGBA; the on-screen canvas is only a
 view of the frame being edited. Rendering blits the document 1:1 into a scratch canvas and scales it up
 with image smoothing off, so cost is independent of canvas size.
+
+## License
+
+Copyright (C) 2026 Benoit Goyette.
+
+pixelart is free software: you can redistribute it and/or modify it under the
+terms of the [GNU General Public License](LICENSE) as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See the GNU General Public License for more details.
+
+In short: use it, change it, share it — but keep the copyright and license
+notices intact, say what you changed, and release derivative work under the same
+license, source included. SPDX identifier: `GPL-3.0-or-later`.
