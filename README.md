@@ -9,8 +9,32 @@ drawing to a `<canvas>`, built with Vite and deployable as a static site.
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-npm run build    # static bundle in dist/
+npm run build    # typecheck + static bundle in dist/
 ```
+
+## Tests
+
+```bash
+npm test         # unit (vitest)
+npm run test:e2e # browser (playwright, starts its own dev server on 5174)
+npm run test:all # build + both suites, as CI runs them
+```
+
+**Unit tests** (`tests/unit`) cover the DOM-free logic where the subtle bugs
+live: shape geometry, flood fill, rotation, colour conversion, and the library's
+storage layer. Failures print ASCII pictures of the shape produced, so a broken
+oval reads as a broken oval.
+
+**Browser tests** (`tests/e2e`) drive the real app through Playwright and cover
+the behaviour units can't reach: frame-aware undo, drag-to-reorder keeping
+history aligned, playback, the save-first prompts, copying a selection across
+frames, and the bytes of an exported PNG. Each test gets a fresh browser context,
+so `localStorage` starts empty without any clearing — which matters, since
+clearing on every load would also wipe the reloads under test.
+
+The suite is written against user-visible behaviour, not internals: it reads
+pixel counts from the filmstrip thumbnails and decodes exported PNGs, rather
+than reaching into application state.
 
 ## Features
 

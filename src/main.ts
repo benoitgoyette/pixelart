@@ -251,6 +251,8 @@ function selectFrame(index: number): void {
   finishRotation();
   clearSelection();
   showFrame(index);
+  // Remember where you were, without claiming the animation changed.
+  writeWork();
   status(`frame ${frameIndex + 1} of ${frames.length}`);
 }
 
@@ -1566,14 +1568,11 @@ window.addEventListener('keydown', (event) => {
 
 // --- persistence -------------------------------------------------------------
 
-function persist(): void {
-  // Any edit worth autosaving is an edit the library copy doesn't have yet.
-  if (!dirty) {
-    dirty = true;
-    syncProjectName();
-    persistSettings();
-  }
-
+/**
+ * Writes the working state without touching the dirty flag — for changes that
+ * are worth restoring but aren't edits, like moving to another frame.
+ */
+function writeWork(): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -1588,6 +1587,16 @@ function persist(): void {
     // Many frames at 128px can outgrow the storage quota.
     status('could not save locally — try fewer frames or a smaller canvas');
   }
+}
+
+/** Autosaves an edit, which also means the library copy is now out of date. */
+function persist(): void {
+  if (!dirty) {
+    dirty = true;
+    syncProjectName();
+    persistSettings();
+  }
+  writeWork();
 }
 
 function persistSettings(): void {
