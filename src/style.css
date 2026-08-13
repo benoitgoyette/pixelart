@@ -154,6 +154,13 @@ button.primary {
   min-height: 0;
 }
 
+/* An image file is over the canvas and would be imported if released. */
+.stage.dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+  background: rgba(65, 166, 246, 0.06);
+}
+
 /* filmstrip */
 
 .filmstrip-panel {

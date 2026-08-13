@@ -66,6 +66,18 @@ eyedropper, select, and duplicate. Keyboard shortcuts: `B` pencil, `E` eraser,
 - Rectangle, oval, and polygon can be filled with the brush color or a separate
   custom color. Polygon interiors use an even-odd scanline fill, so concave
   outlines fill correctly.
+- **Import an image** by dropping a file from your computer onto the canvas, or
+  through the picker in the Image panel. It is averaged down to the grid — one
+  box average per cell, alpha-weighted so cut-out edges don't pick up a dark
+  fringe — and replaces the frame being edited, as one undo step. Framing is
+  either *fit* (all of it, transparent bars on the short axis) or *crop* (fills
+  the grid, trims the overhang). **Snap to palette** maps every cell to the
+  nearest palette entry compared in Oklab, which is what makes a photo read as
+  pixel art rather than as a small photo. Files only — URLs dragged in from
+  other pages are ignored, and a drop that misses the canvas is swallowed rather
+  than navigating away from unsaved art. Coverage is thresholded, so edges stay
+  hard instead of leaving semi-transparent cells the fill tool would treat as
+  extra colors.
 - Rotate the canvas 0–359° about its center, with 90/180/270 presets. Right
   angles are lossless; other angles resample nearest-neighbor and clip the
   corners swept outside.

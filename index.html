@@ -176,6 +176,34 @@
           </section>
 
           <section>
+            <h2>Image</h2>
+            <button type="button" id="import-image" title="Convert an image file into this frame">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 5h16v14H4z" />
+                <path d="m4 16 5-5 4 4 3-3 4 4" />
+                <path d="M9 9.5a1 1 0 1 0 0-.01" />
+              </svg>
+              Import image…
+            </button>
+            <input type="file" id="import-file" accept="image/*" hidden />
+            <label class="field brush-field">
+              Framing
+              <select id="import-fit">
+                <option value="fit" selected>Fit — whole image, bars if needed</option>
+                <option value="crop">Crop — fill the grid, trim the edges</option>
+              </select>
+            </label>
+            <label class="field checkbox">
+              <input type="checkbox" id="import-snap" />
+              Snap to palette
+            </label>
+            <p class="hint">
+              Drop an image file onto the canvas, or pick one here. It is averaged
+              down to the grid and replaces this frame, as one undo step.
+            </p>
+          </section>
+
+          <section>
             <h2>Rotate</h2>
             <label class="field">
               Angle <span class="zoom-value" id="rotate-value">0°</span>

@@ -26,6 +26,13 @@ import {
   saveAnimation,
   uniqueName,
 } from './library';
+import {
+  FitMode,
+  countColors,
+  fileToBitmap,
+  isImageFile,
+  resampleToGrid,
+} from './import';
 import { DEFAULT_PALETTE, hexToRgba, rgbaToCss, rgbaToHex } from './palette';
 import {
   BRUSH_SIZES,
@@ -55,6 +62,7 @@ const el = <T extends HTMLElement>(id: string): T => {
 };
 
 const canvas = el<HTMLCanvasElement>('canvas');
+const stage = el<HTMLElement>('stage');
 const toolsEl = el<HTMLDivElement>('tools');
 const paletteEl = el<HTMLDivElement>('palette');
 const currentSwatch = el<HTMLDivElement>('current-swatch');
@@ -76,6 +84,10 @@ const eraserSizeField = el<HTMLLabelElement>('eraser-size-field');
 const shapeFillSelect = el<HTMLSelectElement>('shape-fill');
 const shapeFillColor = el<HTMLInputElement>('shape-fill-color');
 const shapeSection = el<HTMLElement>('shape-section');
+const importButton = el<HTMLButtonElement>('import-image');
+const importFile = el<HTMLInputElement>('import-file');
+const importFit = el<HTMLSelectElement>('import-fit');
+const importSnap = el<HTMLInputElement>('import-snap');
 const mirrorTool = el<HTMLButtonElement>('mirror-tool');
 const mirrorAxisSelect = el<HTMLSelectElement>('mirror-axis');
 const mirrorAxisField = el<HTMLLabelElement>('mirror-axis-field');
@@ -1423,6 +1435,110 @@ mirrorAxisSelect.addEventListener('change', () => {
   retargetMirror(`mirror on — ${mirrorAxis} axis`);
 });
 
+// --- image import ------------------------------------------------------------
+
+function importOptions(): { mode: FitMode; snapToPalette: boolean } {
+  return {
+    mode: importFit.value === 'crop' ? 'crop' : 'fit',
+    snapToPalette: importSnap.checked,
+  };
+}
+
+/**
+ * Converts an image file into the frame being edited. The whole import is one
+ * undo entry, so a framing choice that didn't work out costs one ⌘Z.
+ */
+async function importImage(file: File): Promise<void> {
+  if (!isImageFile(file)) return status(`${file.name} is not an image file`);
+
+  stopPlayback(false);
+  cancelPolygon();
+  finishRotation();
+  clearSelection();
+  status(`reading ${file.name}…`);
+
+  let frame: Uint8ClampedArray;
+  try {
+    const bitmap = await fileToBitmap(file);
+    // Grid size is read after the decode, so a resize meanwhile can't leave the
+    // buffer the wrong length for the frame it's about to replace.
+    frame = resampleToGrid(bitmap, doc.width, doc.height, importOptions());
+  } catch {
+    return status(`could not read ${file.name} — try a PNG, JPEG or WebP`);
+  }
+
+  beginStroke();
+  doc.restore(frame);
+  endStroke();
+  syncFilmstrip();
+  render();
+
+  const colors = countColors(frame);
+  status(
+    `imported ${file.name} — ${doc.width} × ${doc.height}, ${colors} color${colors === 1 ? '' : 's'}`,
+  );
+}
+
+importButton.addEventListener('click', () => importFile.click());
+
+importFile.addEventListener('change', () => {
+  const file = importFile.files?.[0];
+  // Cleared first, so picking the same file twice still fires a change.
+  importFile.value = '';
+  if (file) void importImage(file);
+});
+
+for (const control of [importFit, importSnap]) {
+  control.addEventListener('change', () => {
+    persistSettings();
+    const { mode, snapToPalette } = importOptions();
+    status(`import: ${mode}${snapToPalette ? ', snapped to the palette' : ''}`);
+  });
+}
+
+/** Whether a drag carries real files; a URL dragged from another page does not. */
+function carriesFiles(transfer: DataTransfer | null): boolean {
+  return transfer !== null && [...transfer.types].includes('Files');
+}
+
+for (const type of ['dragenter', 'dragover'] as const) {
+  stage.addEventListener(type, (event) => {
+    if (!carriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    stage.classList.add('dropping');
+  });
+}
+
+stage.addEventListener('dragleave', (event) => {
+  // Crossing into a child fires dragleave too; only a real exit clears the hint.
+  if (event.relatedTarget instanceof Node && stage.contains(event.relatedTarget)) return;
+  stage.classList.remove('dropping');
+});
+
+stage.addEventListener('drop', (event) => {
+  event.preventDefault();
+  stage.classList.remove('dropping');
+
+  const files = event.dataTransfer?.files;
+  if (!files || files.length === 0) return status('drop an image file from your computer');
+  if (files.length > 1) status(`${files.length} files dropped — importing ${files[0].name}`);
+  void importImage(files[0]);
+});
+
+// A file dropped anywhere else would navigate away from the editor, taking any
+// unsaved art with it, so the window swallows those drops without acting.
+window.addEventListener('dragover', (event) => {
+  if (carriesFiles(event.dataTransfer)) event.preventDefault();
+});
+
+window.addEventListener('drop', (event) => {
+  if (!carriesFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  if (event.target instanceof Node && stage.contains(event.target)) return;
+  status('drop the image onto the canvas to import it');
+});
+
 function readBrushSize(select: HTMLSelectElement, fallback: BrushSize): BrushSize {
   const value = Number(select.value);
   return isBrushSize(value) ? value : fallback;
@@ -1892,6 +2008,8 @@ function persistSettings(): void {
         eraserSize,
         mirror: mirrorOn,
         mirrorAxis,
+        importFit: importFit.value,
+        importSnap: importSnap.checked,
         shapeFill: shapeFillSelect.value,
         shapeFillColor: shapeFillColor.value,
         fps: fpsSelect.value,
@@ -1917,6 +2035,8 @@ function loadSettings(): void {
       eraserSize?: number;
       mirror?: boolean;
       mirrorAxis?: string;
+      importFit?: string;
+      importSnap?: boolean;
       shapeFill?: string;
       shapeFillColor?: string;
       fps?: string;
@@ -1939,6 +2059,8 @@ function loadSettings(): void {
     if (saved.eraserSize !== undefined && isBrushSize(saved.eraserSize)) {
       eraserSize = saved.eraserSize;
     }
+    if (saved.importFit === 'fit' || saved.importFit === 'crop') importFit.value = saved.importFit;
+    importSnap.checked = saved.importSnap ?? false;
     if (saved.mirrorAxis === 'horizontal' || saved.mirrorAxis === 'vertical') {
       mirrorAxis = saved.mirrorAxis;
     }

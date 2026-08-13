@@ -1,4 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Page, expect } from '@playwright/test';
+
+/** Absolute path of a test image under tests/e2e/fixtures. */
+export function fixture(file: string): string {
+  return join(import.meta.dirname, 'fixtures', file);
+}
 
 /**
  * Page object for the editor. Each Playwright test gets a fresh browser context,
@@ -101,6 +108,49 @@ export class Editor {
       .locator('#mirror-tool')
       .getAttribute('aria-pressed')
       .then((value) => value === 'true');
+  }
+
+  // --- image import ----------------------------------------------------------
+
+  /** Imports through the file picker. `file` is a path under tests/e2e/fixtures. */
+  async importFile(file: string): Promise<void> {
+    await this.page.setInputFiles('#import-file', fixture(file));
+    await expect(this.page.locator('#status')).toContainText('imported');
+  }
+
+  /**
+   * Drops a fixture onto the canvas for real: the bytes are read here and
+   * rebuilt as a File inside the page, since a DataTransfer can only be
+   * assembled in the browser.
+   */
+  async dropFile(file: string): Promise<void> {
+    const bytes = [...readFileSync(fixture(file))];
+    await this.page.dispatchEvent('#stage', 'drop', {
+      dataTransfer: await this.page.evaluateHandle(
+        ([name, data]) => {
+          const transfer = new DataTransfer();
+          transfer.items.add(
+            new File([new Uint8Array(data as number[])], name as string, { type: 'image/png' }),
+          );
+          return transfer;
+        },
+        [file, bytes] as [string, number[]],
+      ),
+    });
+  }
+
+  /** The colors of the current frame, as hex, keyed by cell. */
+  frameColors(cells: Array<[number, number]>): Promise<string[]> {
+    return this.page.evaluate((wanted) => {
+      const thumb = document.querySelector<HTMLCanvasElement>('.frame-thumb')!;
+      const data = thumb.getContext('2d')!.getImageData(0, 0, thumb.width, thumb.height).data;
+      const part = (n: number) => n.toString(16).padStart(2, '0');
+      return wanted.map(([x, y]) => {
+        const i = (y * thumb.width + x) * 4;
+        if (data[i + 3] === 0) return 'clear';
+        return `#${part(data[i])}${part(data[i + 1])}${part(data[i + 2])}`;
+      });
+    }, cells);
   }
 
   /** Empties the current frame (the confirm is auto-accepted). */
