@@ -139,6 +139,55 @@ export function rotate(source: PixelDoc, degrees: number): PixelDoc {
   return out;
 }
 
+/**
+ * A rectangle of pixels held outside any document — what the select tool lifts
+ * off the canvas so it can be dragged around and put back down elsewhere.
+ */
+export interface Region {
+  w: number;
+  h: number;
+  /** w × h RGBA quadruplets, row-major. */
+  data: Uint8ClampedArray;
+}
+
+/** Copies the pixels inside `rect` out of `doc`; cells past its edges read transparent. */
+export function liftRegion(doc: PixelDoc, rect: Rect): Region {
+  const data = new Uint8ClampedArray(rect.w * rect.h * 4);
+  let i = 0;
+  for (let row = 0; row < rect.h; row++) {
+    for (let column = 0; column < rect.w; column++) {
+      const x = rect.x + column;
+      const y = rect.y + row;
+      const [r, g, b, a] = doc.contains(x, y) ? doc.get(x, y) : TRANSPARENT;
+      data[i++] = r;
+      data[i++] = g;
+      data[i++] = b;
+      data[i++] = a;
+    }
+  }
+  return { w: rect.w, h: rect.h, data };
+}
+
+/**
+ * Writes `region` into `doc` with its top-left corner at (x, y), replacing what
+ * was there — transparent cells included, so a move leaves no ghost of the
+ * pixels it landed on. Cells outside the document are dropped.
+ */
+export function stampRegion(doc: PixelDoc, region: Region, x: number, y: number): void {
+  let i = 0;
+  for (let row = 0; row < region.h; row++) {
+    for (let column = 0; column < region.w; column++) {
+      doc.set(x + column, y + row, [
+        region.data[i],
+        region.data[i + 1],
+        region.data[i + 2],
+        region.data[i + 3],
+      ]);
+      i += 4;
+    }
+  }
+}
+
 const CHECKER_LIGHT = '#3a3a42';
 const CHECKER_DARK = '#31313a';
 const CHECKER_SIZE = 8; // screen pixels

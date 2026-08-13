@@ -39,11 +39,19 @@ than reaching into application state.
 ## Features
 
 **Tools** — pencil, eraser, line, rectangle, oval, polygon, flood fill,
-eyedropper, and rectangular select. Keyboard shortcuts: `B` pencil, `E` eraser,
+eyedropper, select, and duplicate. Keyboard shortcuts: `B` pencil, `E` eraser,
 `L` line, `R` rectangle, `O` oval, `P` polygon, `G` fill, `I` eyedropper,
-`M` select.
+`M` select, `D` duplicate.
 
 - Pencil and eraser have independent 1×1 / 3×3 / 5×5 widths.
+- The **select** tool marks a rectangle with two clicks — one to start, one to
+  finish, with the rectangle tracking the cursor in between — then moves it. The
+  cursor turns into a hand over a live selection; drag from inside it and the
+  pixels travel with it, landing where you release the button and leaving
+  transparency behind. The rectangle stops at the canvas edge rather than losing
+  pixels, the marquee stays on its new home so it can be dragged again, and the
+  whole move is one undo step (`Esc` mid-drag puts it back, `Esc` after clears
+  the marquee).
 - Shapes preview live across a drag and commit on release, as one undo step.
 - The polygon places a vertex per click; click the ringed start point (or press
   `Enter`) to close it, `Esc` to abandon it. The whole sequence is one undo step.
@@ -64,9 +72,11 @@ eyedropper, and rectangular select. Keyboard shortcuts: `B` pencil, `E` eraser,
   `←` / `→`.
 - **Play** previews the animation in the canvas at 4–24 fps (`Space` toggles it).
 - Drag a thumbnail to reorder frames; a caret shows where it will land.
-- The **select** tool marks a rectangle and, on release, offers to copy it into a
-  single frame, a range, or all of them — landing at the same coordinates and
-  replacing that area, transparency included. The copy is a single undo step.
+- The **duplicate** tool marks a rectangle with two clicks — one to start, one to
+  finish, with the rectangle tracking the cursor in between (`Esc` abandons it).
+  The second click offers to duplicate the region into a single frame, a range,
+  or all of them, landing at the same coordinates and replacing that area,
+  transparency included. The copy is a single undo step.
 - **Delete** removes the current frame. Adding, deleting, and reordering frames
   are not themselves undoable, though reordering keeps the drawing history
   pointing at the right frames.

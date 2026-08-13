@@ -17,19 +17,54 @@ test('selecting marks a region and asks where to copy it', async ({ page }) => {
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 1);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
 
   await expect(page.locator('#copy-dialog')).toBeVisible();
   await expect(page.locator('#copy-summary')).toContainText('4 × 4 px from frame 1');
+});
+
+test('the first click starts the rectangle, the second finishes it', async ({ page }) => {
+  const editor = await Editor.open(page);
+  await blockPlusEmptyFrames(editor, 1);
+  await editor.selectTool('duplicate');
+
+  await editor.clickCell(3, 3);
+  await expect(page.locator('#status')).toContainText('click again to finish');
+  await expect(page.locator('#copy-dialog')).toBeHidden();
+
+  // The rectangle tracks the cursor between the clicks, without a button held.
+  await editor.hoverCell(6, 6);
+  await expect(page.locator('#status')).toContainText('4 × 4');
+  await editor.hoverCell(8, 8);
+  await expect(page.locator('#status')).toContainText('6 × 6');
+
+  await editor.clickCell(8, 8);
+  await expect(page.locator('#copy-dialog')).toBeVisible();
+  await expect(page.locator('#copy-summary')).toContainText('6 × 6 px');
+});
+
+test('Escape abandons a half-made selection', async ({ page }) => {
+  const editor = await Editor.open(page);
+  await blockPlusEmptyFrames(editor, 1);
+  await editor.selectTool('duplicate');
+
+  await editor.clickCell(3, 3);
+  await page.locator('body').press('Escape');
+  await expect(page.locator('#status')).toContainText('selection cleared');
+
+  // The abandoned start point is forgotten: the next click starts afresh.
+  await editor.clickCell(10, 10);
+  await expect(page.locator('#status')).toContainText('click again to finish');
+  await expect(page.locator('#copy-dialog')).toBeHidden();
 });
 
 test('copies into a single frame', async ({ page }) => {
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 2);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.selectOption('#copy-mode', 'single');
   await page.selectOption('#copy-frame', '2'); // zero-based: frame 3
   await page.click('#copy-confirm');
@@ -41,8 +76,8 @@ test('copies into a range, and one undo reverts the whole range', async ({ page 
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 3);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.selectOption('#copy-mode', 'range');
   await page.selectOption('#copy-from', '1');
   await page.selectOption('#copy-to', '3');
@@ -58,8 +93,8 @@ test('copies into all frames, landing at the same coordinates', async ({ page })
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 3);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.selectOption('#copy-mode', 'all');
   await page.click('#copy-confirm');
 
@@ -72,8 +107,8 @@ test('a reversed range is accepted rather than rejected', async ({ page }) => {
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 2);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.selectOption('#copy-mode', 'range');
   await page.selectOption('#copy-from', '2'); // to..from, backwards
   await page.selectOption('#copy-to', '1');
@@ -92,8 +127,8 @@ test('the copied region replaces the target area, transparency included', async 
   expect(await editor.framePixelCounts()).toEqual([4, 1]);
 
   await editor.selectFrame(1);
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [8, 8]); // covers the stray pixel
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [8, 8]); // covers the stray pixel
   await page.selectOption('#copy-mode', 'all');
   await page.click('#copy-confirm');
 
@@ -105,8 +140,8 @@ test('copying onto the source frame alone is refused', async ({ page }) => {
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 1);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.selectOption('#copy-mode', 'single');
   await page.selectOption('#copy-frame', '0'); // the current frame
   await page.click('#copy-confirm');
@@ -119,12 +154,12 @@ test('cancel copies nothing, and Escape clears the marquee', async ({ page }) =>
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 1);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.click('#copy-cancel');
   expect(await editor.framePixelCounts()).toEqual([4, 0]);
 
-  await editor.dragOnCanvas([3, 3], [6, 6]);
+  await editor.selectRegion([3, 3], [6, 6]);
   await page.click('#copy-cancel');
   await page.locator('body').press('Escape');
   await expect(page.locator('#status')).toContainText('selection cleared');
@@ -134,8 +169,8 @@ test('the marquee never becomes part of the art', async ({ page }) => {
   const editor = await Editor.open(page);
   await blockPlusEmptyFrames(editor, 1);
 
-  await editor.selectTool('select');
-  await editor.dragOnCanvas([10, 10], [20, 20]); // over empty canvas
+  await editor.selectTool('duplicate');
+  await editor.selectRegion([10, 10], [20, 20]); // over empty canvas
   await page.click('#copy-cancel');
 
   // Selecting empty space and cancelling leaves the pixel counts untouched.

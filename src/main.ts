@@ -3,9 +3,13 @@ import {
   PixelDoc,
   RGBA,
   Rect,
+  Region,
   Renderer,
+  TRANSPARENT,
+  liftRegion,
   linePoints,
   rotate,
+  stampRegion,
   toPngBlob,
   toSpriteSheetBlob,
 } from './canvas';
@@ -27,10 +31,12 @@ import {
   TOOLS,
   ToolId,
   applyTool,
+  fillShape,
   hasBrushSize,
   hasShapeFill,
   isBrushSize,
   isDestructive,
+  isMarquee,
   isShapeTool,
   strokePolygon,
   strokeShape,
@@ -140,6 +146,15 @@ let rotateBase: Uint8ClampedArray | null = null;
 /** Marquee from the select tool, in art pixels, and the corner it started at. */
 let selection: Rect | null = null;
 let selectOrigin: [number, number] | null = null;
+/**
+ * A selection being dragged: the pixels lifted off the canvas, the frame as it
+ * stood before the drag, the rectangle they came from, and where inside it the
+ * cursor took hold. All null when no move is in flight.
+ */
+let moveRegion: Region | null = null;
+let moveBase: Uint8ClampedArray | null = null;
+let moveFrom: Rect | null = null;
+let moveGrab: [number, number] | null = null;
 /** Where a shape drag started, and the canvas to redraw it against each move. */
 let shapeOrigin: [number, number] | null = null;
 let shapeBase: Uint8ClampedArray | null = null;
@@ -833,10 +848,130 @@ function previewShape(x: number, y: number): void {
 // --- selection ---------------------------------------------------------------
 
 function clearSelection(): void {
+  cancelMove();
   if (selection === null && selectOrigin === null) return;
   selection = null;
   selectOrigin = null;
+  syncCanvasCursor(null);
   render();
+}
+
+function insideSelection(x: number, y: number): boolean {
+  if (selection === null) return false;
+  return (
+    x >= selection.x &&
+    y >= selection.y &&
+    x < selection.x + selection.w &&
+    y < selection.y + selection.h
+  );
+}
+
+/**
+ * A live selection is a handle, so the cursor says so: an open hand over it and
+ * a closed one while it's being dragged. Pass null when the cursor has left the
+ * canvas, which drops back to the drawing crosshair.
+ */
+function syncCanvasCursor(cell: [number, number] | null): void {
+  const overSelection =
+    cell !== null &&
+    tool === 'select' &&
+    selectOrigin === null &&
+    moveRegion === null &&
+    insideSelection(cell[0], cell[1]);
+
+  canvas.classList.toggle('over-selection', overSelection);
+  canvas.classList.toggle('moving-selection', moveRegion !== null);
+}
+
+/**
+ * Takes hold of the marked rectangle: lifts its pixels out and opens one undo
+ * entry for the whole drag. Nothing is drawn yet — the first pointermove paints
+ * the preview, so a click that never moves leaves the art untouched.
+ */
+function beginMove(x: number, y: number): void {
+  if (selection === null) return;
+
+  moveRegion = liftRegion(doc, selection);
+  moveBase = doc.snapshot();
+  moveFrom = { ...selection };
+  moveGrab = [x - selection.x, y - selection.y];
+  beginStroke();
+  syncCanvasCursor([x, y]);
+  status(`moving ${selection.w} × ${selection.h} selection`);
+}
+
+/**
+ * Redraws the drag: the frame as it was, the vacated rectangle wiped to
+ * transparent, then the lifted pixels at the cursor. The rectangle stays whole
+ * on the canvas rather than letting its edge slide off and lose pixels.
+ */
+function previewMove(x: number, y: number): void {
+  if (moveRegion === null || moveBase === null || moveFrom === null || moveGrab === null) return;
+
+  const nx = Math.min(Math.max(x - moveGrab[0], 0), doc.width - moveRegion.w);
+  const ny = Math.min(Math.max(y - moveGrab[1], 0), doc.height - moveRegion.h);
+
+  doc.restore(moveBase);
+  fillShape(
+    'rect',
+    doc,
+    moveFrom.x,
+    moveFrom.y,
+    moveFrom.x + moveFrom.w - 1,
+    moveFrom.y + moveFrom.h - 1,
+    TRANSPARENT,
+  );
+  // Stamped last, so where the destination overlaps the source the moved pixels
+  // win instead of being wiped by the clear above.
+  stampRegion(doc, moveRegion, nx, ny);
+
+  selection = { x: nx, y: ny, w: moveRegion.w, h: moveRegion.h };
+  render();
+  status(`moving selection to ${nx}, ${ny}`);
+}
+
+/**
+ * Drops the selection where it was released. The preview already wrote the
+ * pixels, so this only closes the undo entry and leaves the marquee on its new
+ * home — ready to be dragged again from there.
+ */
+function finishMove(): void {
+  if (moveRegion === null || selection === null) return;
+  const { x, y, w, h } = selection;
+  const moved = moveFrom === null || moveFrom.x !== x || moveFrom.y !== y;
+
+  moveRegion = null;
+  moveBase = null;
+  moveFrom = null;
+  moveGrab = null;
+
+  // A grab that never travelled changed nothing, so it should not cost an undo.
+  if (!moved) {
+    discardStroke();
+    status(`${w} × ${h} selection — drag inside it to move it`);
+    return;
+  }
+
+  endStroke();
+  syncFilmstrip();
+  status(`moved ${w} × ${h} selection to ${x}, ${y}`);
+}
+
+/** Puts a drag back where it started, undo entry included. */
+function cancelMove(): void {
+  if (moveRegion === null || moveBase === null) return;
+
+  doc.restore(moveBase);
+  selection = moveFrom;
+  moveRegion = null;
+  moveBase = null;
+  moveFrom = null;
+  moveGrab = null;
+
+  discardStroke();
+  syncCanvasCursor(null);
+  render();
+  persist();
 }
 
 /** The marquee spanning the drag, in whole cells and clamped to the canvas. */
@@ -1040,10 +1175,33 @@ canvas.addEventListener('pointerdown', (event) => {
     return;
   }
 
-  if (tool === 'select') {
-    selectOrigin = clampToDoc(x, y);
-    selection = selectionBetween(selectOrigin, selectOrigin);
+  // Both marquee tools are click-to-start, click-to-finish. Two clicks beat a
+  // drag on a trackpad, and the rectangle can be adjusted freely in between.
+  // Duplicate's second click opens the copy dialog; select's leaves the marquee
+  // sitting there, and pressing inside it afterwards drags the pixels.
+  if (isMarquee(tool)) {
+    if (tool === 'select' && selectOrigin === null && insideSelection(x, y)) {
+      beginMove(x, y);
+      return;
+    }
+
+    if (selectOrigin === null) {
+      selectOrigin = clampToDoc(x, y);
+      selection = selectionBetween(selectOrigin, selectOrigin);
+      render();
+      status('click again to finish the selection');
+      return;
+    }
+
+    selection = selectionBetween(selectOrigin, [x, y]);
+    selectOrigin = null;
     render();
+    if (tool === 'duplicate') {
+      openCopyDialog();
+    } else {
+      syncCanvasCursor([x, y]);
+      status(`${selection.w} × ${selection.h} selection — drag inside it to move it`);
+    }
     return;
   }
 
@@ -1062,11 +1220,18 @@ canvas.addEventListener('pointerdown', (event) => {
 
 canvas.addEventListener('pointermove', (event) => {
   const [x, y] = cellFromEvent(event);
+  syncCanvasCursor([x, y]);
 
+  if (moveRegion !== null) {
+    previewMove(x, y);
+    return;
+  }
+
+  // Between the two clicks the rectangle follows the cursor, button or not.
   if (selectOrigin !== null) {
     selection = selectionBetween(selectOrigin, [x, y]);
     render();
-    status(`selection ${selection.w} × ${selection.h}`);
+    status(`selection ${selection.w} × ${selection.h} — click to finish`);
     return;
   }
 
@@ -1099,19 +1264,25 @@ function releasePointer(): void {
   shapeOrigin = null;
   shapeBase = null;
 
-  // Releasing a marquee is what asks where to copy it.
-  if (selectOrigin !== null) {
-    selectOrigin = null;
-    if (selection !== null) openCopyDialog();
-    return;
-  }
+  // Releasing a dragged selection is what commits the move.
+  if (moveRegion !== null) return finishMove();
+  // A marquee in progress outlives the pointer: it ends on the next click.
+  if (selectOrigin !== null) return;
   // A pending polygon outlives the pointer, so its stroke stays open.
   if (polygonBase !== null) return;
   endStroke();
 }
 
-canvas.addEventListener('pointerup', releasePointer);
-canvas.addEventListener('pointercancel', releasePointer);
+canvas.addEventListener('pointerup', (event) => {
+  releasePointer();
+  // The marquee travelled with the pointer, so the hand may need to come back.
+  syncCanvasCursor(cellFromEvent(event));
+});
+canvas.addEventListener('pointercancel', () => {
+  releasePointer();
+  syncCanvasCursor(null);
+});
+canvas.addEventListener('pointerleave', () => syncCanvasCursor(null));
 
 // --- UI ----------------------------------------------------------------------
 
@@ -1153,6 +1324,7 @@ function setTool(next: ToolId): void {
   }
   tool = next;
   syncTools();
+  syncCanvasCursor(null);
   const size = toolContext.size;
   status(hasBrushSize(next) ? `${next} ${size} × ${size}` : next);
 }
@@ -1533,6 +1705,14 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && polygonBase !== null) {
     event.preventDefault();
     cancelPolygon();
+    return;
+  }
+
+  // Mid-drag, Escape means "put it back", not "forget the selection".
+  if (event.key === 'Escape' && moveRegion !== null) {
+    event.preventDefault();
+    cancelMove();
+    status('move cancelled');
     return;
   }
 

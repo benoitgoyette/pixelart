@@ -36,14 +36,14 @@ describe('tool metadata', () => {
   it('marks only the read-only tools as non-destructive', () => {
     expect(isDestructive('pencil')).toBe(true);
     expect(isDestructive('eyedropper')).toBe(false);
-    expect(isDestructive('select')).toBe(false);
+    expect(isDestructive('duplicate')).toBe(false);
   });
 
   it('offers a brush width to the tools that stroke', () => {
     for (const tool of ['pencil', 'eraser', 'line', 'rect', 'oval', 'polygon'] as const) {
       expect(hasBrushSize(tool)).toBe(true);
     }
-    for (const tool of ['bucket', 'eyedropper', 'select'] as const) {
+    for (const tool of ['bucket', 'eyedropper', 'duplicate'] as const) {
       expect(hasBrushSize(tool)).toBe(false);
     }
   });

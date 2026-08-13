@@ -9,7 +9,8 @@ export type ToolId =
   | 'rect'
   | 'oval'
   | 'polygon'
-  | 'select';
+  | 'select'
+  | 'duplicate';
 
 /** Tools drawn by dragging out a preview and committing on release. */
 export type ShapeTool = Extract<ToolId, 'line' | 'rect' | 'oval'>;
@@ -31,6 +32,7 @@ export const TOOLS: ToolDef[] = [
   { id: 'bucket', label: 'Fill', icon: '🪣', shortcut: 'g' },
   { id: 'eyedropper', label: 'Pick', icon: '💧', shortcut: 'i' },
   { id: 'select', label: 'Select', icon: '⬚', shortcut: 'm' },
+  { id: 'duplicate', label: 'Duplicate', icon: '⧉', shortcut: 'd' },
 ];
 
 /** Square brush widths, in art pixels. */
@@ -84,10 +86,16 @@ export function stamp(
   }
 }
 
+/** Whether a tool marks a rectangular region rather than painting. */
+export function isMarquee(tool: ToolId): boolean {
+  return tool === 'select' || tool === 'duplicate';
+}
+
 /** Whether a tool mutates the document (and so should open an undo entry). */
 export function isDestructive(tool: ToolId): boolean {
-  // Select only marks a region; the copy it leads to opens its own entry.
-  return tool !== 'eyedropper' && tool !== 'select';
+  // Marquee tools only mark a region; the copy or move it leads to opens its
+  // own entry, and marking alone must not land in the history.
+  return tool !== 'eyedropper' && !isMarquee(tool);
 }
 
 export function applyTool(tool: ToolId, ctx: ToolContext, x: number, y: number): void {
@@ -110,7 +118,9 @@ export function applyTool(tool: ToolId, ctx: ToolContext, x: number, y: number):
       ctx.setColor(doc.get(x, y));
       break;
     case 'select':
-      // Marks a region; the editor owns the marquee and the copy that follows.
+    case 'duplicate':
+      // Mark a region; the editor owns the marquee and the move or copy that
+      // follows it.
       break;
     case 'line':
     case 'rect':

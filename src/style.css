@@ -292,6 +292,15 @@ button.primary {
   touch-action: none;
 }
 
+/* A selection under the cursor is a handle, so the pointer becomes a hand. */
+#canvas.over-selection {
+  cursor: grab;
+}
+
+#canvas.moving-selection {
+  cursor: grabbing;
+}
+
 /* tools */
 
 .tools {

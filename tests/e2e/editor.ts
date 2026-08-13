@@ -20,6 +20,11 @@ export class Editor {
 
   // --- geometry --------------------------------------------------------------
 
+  /** Screen position of the centre of art-pixel (cx, cy) — for hand-rolled gestures. */
+  cellPoint(cx: number, cy: number): Promise<{ x: number; y: number }> {
+    return this.cell(cx, cy);
+  }
+
   /** Screen position of the centre of art-pixel (cx, cy). */
   private async cell(cx: number, cy: number): Promise<{ x: number; y: number }> {
     const box = await this.page.locator('#canvas').boundingBox();
@@ -37,11 +42,34 @@ export class Editor {
 
   // --- drawing ---------------------------------------------------------------
 
-  async paint(cx: number, cy: number): Promise<void> {
+  /** A single click on an art cell. */
+  async clickCell(cx: number, cy: number): Promise<void> {
     const at = await this.cell(cx, cy);
     await this.page.mouse.move(at.x, at.y);
     await this.page.mouse.down();
     await this.page.mouse.up();
+  }
+
+  /** Same gesture, named for what it does with a drawing tool selected. */
+  paint(cx: number, cy: number): Promise<void> {
+    return this.clickCell(cx, cy);
+  }
+
+  /** Both marquee tools are click-to-start, click-to-finish. */
+  async selectRegion(from: [number, number], to: [number, number]): Promise<void> {
+    await this.clickCell(...from);
+    await this.hoverCell(...to); // let the marquee track the cursor first
+    await this.clickCell(...to);
+  }
+
+  /** The cursor the browser actually shows over the canvas. */
+  canvasCursor(): Promise<string> {
+    return this.page.locator('#canvas').evaluate((el) => getComputedStyle(el).cursor);
+  }
+
+  async hoverCell(cx: number, cy: number): Promise<void> {
+    const at = await this.cell(cx, cy);
+    await this.page.mouse.move(at.x, at.y);
   }
 
   async dragOnCanvas(from: [number, number], to: [number, number]): Promise<void> {
@@ -86,6 +114,21 @@ export class Editor {
         return on;
       }),
     );
+  }
+
+  /** Opaque cells of one frame (1-based) as [x, y] pairs, so failures read as coordinates. */
+  framePixelCells(oneBased = 1): Promise<Array<[number, number]>> {
+    return this.page.evaluate((index) => {
+      const thumb = document.querySelectorAll<HTMLCanvasElement>('.frame-thumb')[index];
+      const data = thumb.getContext('2d')!.getImageData(0, 0, thumb.width, thumb.height).data;
+      const cells: Array<[number, number]> = [];
+      for (let i = 3; i < data.length; i += 4) {
+        if (data[i] === 0) continue;
+        const cell = (i - 3) / 4;
+        cells.push([cell % thumb.width, Math.floor(cell / thumb.width)]);
+      }
+      return cells;
+    }, oneBased - 1);
   }
 
   frameCounter(): Promise<string> {

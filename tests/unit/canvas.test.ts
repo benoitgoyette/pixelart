@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PixelDoc, rotate, sameColor } from '../../src/canvas';
+import {
+  PixelDoc,
+  TRANSPARENT,
+  liftRegion,
+  rotate,
+  sameColor,
+  stampRegion,
+} from '../../src/canvas';
 import { floodFill } from '../../src/tools';
 import { BLUE, RED, countOpaque, docFromRows, rowsFromDoc } from './helpers';
 
@@ -77,6 +84,81 @@ describe('floodFill', () => {
     const doc = new PixelDoc(128, 128);
     floodFill(doc, 64, 64, RED);
     expect(countOpaque(doc)).toBe(128 * 128);
+  });
+});
+
+describe('liftRegion and stampRegion', () => {
+  // An L, so a flipped or transposed region can't pass as correct.
+  const L = docFromRows([
+    '......',
+    '.#....',
+    '.#....',
+    '.##...',
+    '......',
+    '......',
+  ]);
+
+  it('lifts a rectangle and stamps it back unchanged', () => {
+    const region = liftRegion(L, { x: 1, y: 1, w: 2, h: 3 });
+    const doc = new PixelDoc(6, 6);
+    stampRegion(doc, region, 1, 1);
+    expect(rowsFromDoc(doc)).toEqual(rowsFromDoc(L));
+  });
+
+  it('carries the pixels to a new corner', () => {
+    const region = liftRegion(L, { x: 1, y: 1, w: 2, h: 3 });
+    const doc = new PixelDoc(6, 6);
+    stampRegion(doc, region, 3, 2);
+    expect(rowsFromDoc(doc)).toEqual([
+      '......',
+      '......',
+      '...#..',
+      '...#..',
+      '...##.',
+      '......',
+    ]);
+  });
+
+  it('replaces the destination rather than merging into it', () => {
+    // A blank region stamped over art wipes it: transparency is carried too.
+    const blank = liftRegion(new PixelDoc(6, 6), { x: 0, y: 0, w: 2, h: 3 });
+    const doc = docFromRows(rowsFromDoc(L));
+    stampRegion(doc, blank, 1, 1);
+    expect(countOpaque(doc)).toBe(0);
+  });
+
+  it('reads transparent past the edges instead of failing', () => {
+    const region = liftRegion(L, { x: 4, y: 4, w: 4, h: 4 });
+    expect(region.data.every((channel) => channel === 0)).toBe(true);
+  });
+
+  it('drops the part of a stamp that falls outside the canvas', () => {
+    const region = liftRegion(L, { x: 1, y: 1, w: 2, h: 3 });
+    const doc = new PixelDoc(6, 6);
+    stampRegion(doc, region, 5, 4);
+    // Only the top-left cell of the L lands; the rest is off the canvas.
+    expect(countOpaque(doc)).toBe(2);
+    expect(doc.get(5, 4)).toEqual(RED);
+  });
+
+  it('survives a self-overlapping move, source cleared then stamped', () => {
+    const doc = docFromRows(rowsFromDoc(L));
+    const from = { x: 1, y: 1, w: 2, h: 3 };
+    const region = liftRegion(doc, from);
+
+    for (let y = from.y; y < from.y + from.h; y++) {
+      for (let x = from.x; x < from.x + from.w; x++) doc.set(x, y, TRANSPARENT);
+    }
+    stampRegion(doc, region, 2, 2); // one cell right and down — overlaps itself
+
+    expect(rowsFromDoc(doc)).toEqual([
+      '......',
+      '......',
+      '..#...',
+      '..#...',
+      '..##..',
+      '......',
+    ]);
   });
 });
 
