@@ -4,6 +4,33 @@ export type RGBA = [number, number, number, number];
 export const TRANSPARENT: RGBA = [0, 0, 0, 0];
 
 /**
+ * Which way the mirror line runs. A vertical line reflects left to right; a
+ * horizontal one reflects top to bottom.
+ */
+export type MirrorAxis = 'vertical' | 'horizontal';
+
+/** The cell (x, y) reflects onto across the canvas's center line. */
+export function mirrorPoint(
+  width: number,
+  height: number,
+  axis: MirrorAxis,
+  x: number,
+  y: number,
+): [number, number] {
+  return axis === 'vertical' ? [width - 1 - x, y] : [x, height - 1 - y];
+}
+
+/**
+ * The span of cells on `anchor`'s side of the center line, as [first, last].
+ * An odd extent has a middle cell that is its own reflection; it belongs to
+ * both halves, so a shape anchored anywhere may reach it.
+ */
+export function mirrorHalf(extent: number, anchor: number): [number, number] {
+  const middle = extent / 2;
+  return anchor < middle ? [0, Math.ceil(middle) - 1] : [Math.floor(middle), extent - 1];
+}
+
+/**
  * A pixel document: a flat RGBA buffer plus the geometry to address it.
  * This is the single source of truth; the on-screen canvas is only a view of it.
  */
@@ -11,6 +38,12 @@ export class PixelDoc {
   readonly width: number;
   readonly height: number;
   data: Uint8ClampedArray;
+  /**
+   * While set, every write is echoed onto the reflected cell. The editor turns
+   * this on around a paint operation and off again straight after, so moving a
+   * selection or copying between frames stays untouched by it.
+   */
+  mirror: MirrorAxis | null = null;
 
   constructor(width: number, height: number, data?: Uint8ClampedArray) {
     this.width = width;
@@ -29,6 +62,15 @@ export class PixelDoc {
   }
 
   set(x: number, y: number, color: RGBA): void {
+    this.write(x, y, color);
+    if (this.mirror === null) return;
+    const [mx, my] = mirrorPoint(this.width, this.height, this.mirror, x, y);
+    // A cell sitting on the line is its own reflection; writing it twice is
+    // harmless but pointless.
+    if (mx !== x || my !== y) this.write(mx, my, color);
+  }
+
+  private write(x: number, y: number, color: RGBA): void {
     if (!this.contains(x, y)) return;
     const i = (y * this.width + x) * 4;
     this.data[i] = color[0];
@@ -201,6 +243,8 @@ export interface RenderOptions {
   marker?: [number, number] | null;
   /** Marquee drawn over the art, in art-pixel coordinates. */
   selection?: Rect | null;
+  /** Axis of the mirror line to draw over the art, or null when mirroring is off. */
+  mirror?: MirrorAxis | null;
 }
 
 export interface Rect {
@@ -225,7 +269,10 @@ export class Renderer {
     this.scratchCtx = require2d(this.scratch);
   }
 
-  render(doc: PixelDoc, { zoom, showGrid, background, marker, selection }: RenderOptions): void {
+  render(
+    doc: PixelDoc,
+    { zoom, showGrid, background, marker, selection, mirror }: RenderOptions,
+  ): void {
     const w = doc.width * zoom;
     const h = doc.height * zoom;
 
@@ -243,8 +290,33 @@ export class Renderer {
     }
     this.drawPixels(doc, w, h);
     if (showGrid && zoom >= 6) this.drawGrid(doc, zoom, w, h);
+    if (mirror) this.drawMirror(mirror, w, h);
     if (marker) this.drawMarker(marker, zoom);
     if (selection) this.drawSelection(selection, zoom);
+  }
+
+  /** The mirror line, straight down the middle of the canvas — overlay only. */
+  private drawMirror(axis: MirrorAxis, w: number, h: number): void {
+    const ctx = this.ctx;
+    const at = Math.round(axis === 'vertical' ? w / 2 : h / 2) + 0.5;
+
+    ctx.save();
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (axis === 'vertical') {
+      ctx.moveTo(at, 0);
+      ctx.lineTo(at, h);
+    } else {
+      ctx.moveTo(0, at);
+      ctx.lineTo(w, at);
+    }
+    // Drawn twice: a dark line first so the dashes read over pale art too.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.stroke();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = '#ffcd75';
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Marching-ants style marquee — an overlay, never part of the art. */

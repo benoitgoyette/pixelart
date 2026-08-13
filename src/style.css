@@ -8,6 +8,8 @@
   --text: #e8e8ec;
   --text-dim: #9a9aa6;
   --accent: #41a6f6;
+  /* Second accent, for overlays that must not be mistaken for a selection. */
+  --mirror: #ffcd75;
   color-scheme: dark;
 }
 
@@ -318,6 +320,16 @@ button.primary {
 .tool.active {
   border-color: var(--accent);
   background: rgba(65, 166, 246, 0.14);
+}
+
+/* A modifier rather than a tool of its own, so it sits on its own row. */
+.mirror-tool {
+  width: 100%;
+}
+
+.mirror-tool.active {
+  border-color: var(--mirror);
+  background: rgba(255, 205, 117, 0.16);
 }
 
 .brush-field {

@@ -1,5 +1,6 @@
 import {
   MAX_SHEET_PX,
+  MirrorAxis,
   PixelDoc,
   RGBA,
   Rect,
@@ -8,6 +9,7 @@ import {
   TRANSPARENT,
   liftRegion,
   linePoints,
+  mirrorHalf,
   rotate,
   stampRegion,
   toPngBlob,
@@ -74,6 +76,10 @@ const eraserSizeField = el<HTMLLabelElement>('eraser-size-field');
 const shapeFillSelect = el<HTMLSelectElement>('shape-fill');
 const shapeFillColor = el<HTMLInputElement>('shape-fill-color');
 const shapeSection = el<HTMLElement>('shape-section');
+const mirrorTool = el<HTMLButtonElement>('mirror-tool');
+const mirrorAxisSelect = el<HTMLSelectElement>('mirror-axis');
+const mirrorAxisField = el<HTMLLabelElement>('mirror-axis-field');
+const mirrorHint = el<HTMLParagraphElement>('mirror-hint');
 const shapeFillPalette = el<HTMLDivElement>('shape-fill-palette');
 const saveDialog = el<HTMLDialogElement>('save-dialog');
 const saveName = el<HTMLInputElement>('save-name');
@@ -123,6 +129,12 @@ let lastFilename = '';
 /** Pencil and eraser carry independent widths, the way desktop editors do. */
 let pencilSize: BrushSize = 1;
 let eraserSize: BrushSize = 1;
+/**
+ * Mirror editing is a modifier on whatever tool is in hand rather than a tool of
+ * its own, so it stays on across tool changes until it's switched off.
+ */
+let mirrorOn = false;
+let mirrorAxis: MirrorAxis = 'vertical';
 
 /**
  * History spans frames, so each entry records which ones it covers. A stroke
@@ -817,8 +829,23 @@ const toolContext = {
   },
 };
 
+/**
+ * Runs a paint operation with the frame echoing every write across the mirror
+ * line, then puts the frame back the way it was. Everything that touches pixels
+ * goes through PixelDoc.set, so this covers brushes, shapes and fills alike —
+ * and leaving it off by default keeps selection moves and frame copies literal.
+ */
+function withMirror<T>(paint: () => T): T {
+  doc.mirror = mirrorOn ? mirrorAxis : null;
+  try {
+    return paint();
+  } finally {
+    doc.mirror = null;
+  }
+}
+
 function paintAt(x: number, y: number): void {
-  applyTool(tool, toolContext, x, y);
+  withMirror(() => applyTool(tool, toolContext, x, y));
   render();
 }
 
@@ -831,18 +858,41 @@ function clampToDoc(x: number, y: number): [number, number] {
 }
 
 /**
+ * Confines a shape to the half of the canvas its first point landed in. Without
+ * this, an outline crossing the mirror line would be echoed back over the side
+ * it came from, and what you drew would be buried under its own reflection.
+ * Off-mirror, this is just clampToDoc.
+ */
+function clampToHalf(x: number, y: number, anchor: [number, number]): [number, number] {
+  const [cx, cy] = clampToDoc(x, y);
+  if (!mirrorOn) return [cx, cy];
+
+  if (mirrorAxis === 'vertical') {
+    const [first, last] = mirrorHalf(doc.width, anchor[0]);
+    return [Math.min(Math.max(cx, first), last), cy];
+  }
+  const [first, last] = mirrorHalf(doc.height, anchor[1]);
+  return [cx, Math.min(Math.max(cy, first), last)];
+}
+
+/**
  * Redraws the in-progress shape: restore the pre-drag pixels, then stamp the
  * outline for the current corner. Cheap enough to run on every pointermove.
  */
 function previewShape(x: number, y: number): void {
   if (shapeOrigin === null || shapeBase === null || !isShapeTool(tool)) return;
+  // Captured while the guard above still has `tool` narrowed to a shape.
+  const shape = tool;
   const [ox, oy] = shapeOrigin;
-  const [cx, cy] = clampToDoc(x, y);
+  // The far corner can't cross the mirror line; the outline would fold onto itself.
+  const [cx, cy] = clampToHalf(x, y, shapeOrigin);
 
   doc.restore(shapeBase);
-  strokeShape(tool, toolContext, ox, oy, cx, cy, shapeFill());
+  withMirror(() => strokeShape(shape, toolContext, ox, oy, cx, cy, shapeFill()));
   render();
-  status(`${tool} ${Math.abs(cx - ox) + 1} × ${Math.abs(cy - oy) + 1}`);
+  status(
+    `${tool} ${Math.abs(cx - ox) + 1} × ${Math.abs(cy - oy) + 1}${mirrorOn ? ' (mirrored)' : ''}`,
+  );
 }
 
 // --- selection ---------------------------------------------------------------
@@ -1094,11 +1144,17 @@ function previewPolygon(cursor: [number, number] | null): void {
   const closing =
     cursor !== null && samePoint(cursor, polygonPoints[0]) && polygonPoints.length >= 3;
 
-  if (closing) {
-    strokePolygon(toolContext, polygonPoints, true, shapeFill());
-  } else {
-    strokePolygon(toolContext, cursor === null ? polygonPoints : [...polygonPoints, cursor], false);
-  }
+  withMirror(() => {
+    if (closing) {
+      strokePolygon(toolContext, polygonPoints, true, shapeFill());
+    } else {
+      strokePolygon(
+        toolContext,
+        cursor === null ? polygonPoints : [...polygonPoints, cursor],
+        false,
+      );
+    }
+  });
 
   render();
   status(
@@ -1109,7 +1165,9 @@ function previewPolygon(cursor: [number, number] | null): void {
 }
 
 function addPolygonPoint(x: number, y: number): void {
-  const point = clampToDoc(x, y);
+  // Every vertex after the first is held on the first one's side of the mirror.
+  const point =
+    polygonPoints.length === 0 ? clampToDoc(x, y) : clampToHalf(x, y, polygonPoints[0]);
 
   if (polygonPoints.length === 0) {
     beginStroke();
@@ -1137,7 +1195,7 @@ function closePolygon(): void {
   const count = polygonPoints.length;
 
   doc.restore(polygonBase);
-  strokePolygon(toolContext, polygonPoints, true, shapeFill());
+  withMirror(() => strokePolygon(toolContext, polygonPoints, true, shapeFill()));
   polygonPoints = [];
   polygonBase = null;
 
@@ -1235,8 +1293,8 @@ canvas.addEventListener('pointermove', (event) => {
     return;
   }
 
-  if (polygonBase !== null) {
-    previewPolygon(clampToDoc(x, y));
+  if (polygonBase !== null && polygonPoints.length > 0) {
+    previewPolygon(clampToHalf(x, y, polygonPoints[0]));
     return;
   }
 
@@ -1253,7 +1311,9 @@ canvas.addEventListener('pointermove', (event) => {
 
   // Fill and eyedropper are single-shot; only freehand tools follow the drag.
   if (tool === 'pencil' || tool === 'eraser') {
-    for (const [lx, ly] of linePoints(px, py, x, y)) applyTool(tool, toolContext, lx, ly);
+    withMirror(() => {
+      for (const [lx, ly] of linePoints(px, py, x, y)) applyTool(tool, toolContext, lx, ly);
+    });
     render();
   }
   lastCell = [x, y];
@@ -1328,6 +1388,40 @@ function setTool(next: ToolId): void {
   const size = toolContext.size;
   status(hasBrushSize(next) ? `${next} ${size} × ${size}` : next);
 }
+
+// --- mirror ------------------------------------------------------------------
+
+function syncMirror(): void {
+  mirrorTool.classList.toggle('active', mirrorOn);
+  mirrorTool.setAttribute('aria-pressed', String(mirrorOn));
+  mirrorAxisField.hidden = !mirrorOn;
+  mirrorHint.hidden = !mirrorOn;
+  mirrorAxisSelect.value = mirrorAxis;
+  render();
+}
+
+/**
+ * Turning the mirror on or moving its axis changes which half a shape is held
+ * in, so any shape still being placed is dropped rather than half-confined.
+ */
+function retargetMirror(describe: string): void {
+  cancelPolygon();
+  syncMirror();
+  persistSettings();
+  status(describe);
+}
+
+function toggleMirror(): void {
+  mirrorOn = !mirrorOn;
+  retargetMirror(mirrorOn ? `mirror on — ${mirrorAxis} axis` : 'mirror off');
+}
+
+mirrorTool.addEventListener('click', toggleMirror);
+
+mirrorAxisSelect.addEventListener('change', () => {
+  mirrorAxis = mirrorAxisSelect.value === 'horizontal' ? 'horizontal' : 'vertical';
+  retargetMirror(`mirror on — ${mirrorAxis} axis`);
+});
 
 function readBrushSize(select: HTMLSelectElement, fallback: BrushSize): BrushSize {
   const value = Number(select.value);
@@ -1742,6 +1836,13 @@ window.addEventListener('keydown', (event) => {
     return;
   }
 
+  // Mirror is a modifier, not one of the TOOLS, so it carries its own key.
+  if (event.key.toLowerCase() === 'x' && !event.metaKey && !event.ctrlKey) {
+    event.preventDefault();
+    toggleMirror();
+    return;
+  }
+
   const match = TOOLS.find((def) => def.shortcut === event.key.toLowerCase());
   if (match) setTool(match.id);
 });
@@ -1789,6 +1890,8 @@ function persistSettings(): void {
         filename: lastFilename,
         pencilSize,
         eraserSize,
+        mirror: mirrorOn,
+        mirrorAxis,
         shapeFill: shapeFillSelect.value,
         shapeFillColor: shapeFillColor.value,
         fps: fpsSelect.value,
@@ -1812,6 +1915,8 @@ function loadSettings(): void {
       filename?: string;
       pencilSize?: number;
       eraserSize?: number;
+      mirror?: boolean;
+      mirrorAxis?: string;
       shapeFill?: string;
       shapeFillColor?: string;
       fps?: string;
@@ -1834,6 +1939,10 @@ function loadSettings(): void {
     if (saved.eraserSize !== undefined && isBrushSize(saved.eraserSize)) {
       eraserSize = saved.eraserSize;
     }
+    if (saved.mirrorAxis === 'horizontal' || saved.mirrorAxis === 'vertical') {
+      mirrorAxis = saved.mirrorAxis;
+    }
+    mirrorOn = saved.mirror ?? false;
   } catch {
     /* fall back to the transparent default */
   }
@@ -1881,6 +1990,7 @@ function render(): void {
     background,
     marker: polygonPoints.length > 0 ? polygonPoints[0] : null,
     selection,
+    mirror: mirrorOn ? mirrorAxis : null,
   });
 }
 
@@ -1896,6 +2006,7 @@ buildPalette();
 setColor(color);
 zoomValue.textContent = `${zoom}×`;
 applyShapeFill();
+syncMirror();
 buildFilmstrip();
 showFrame(pendingFrameIndex);
 applyBackground();

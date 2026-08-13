@@ -92,6 +92,32 @@
           </section>
 
           <section>
+            <h2>Mirror</h2>
+            <button
+              type="button"
+              class="tool mirror-tool"
+              id="mirror-tool"
+              data-tool="mirror"
+              aria-pressed="false"
+              title="Mirror edit (X)"
+            >
+              <span class="tool-icon">⇋</span>
+              <span>Mirror edit</span>
+            </button>
+            <label class="field brush-field" id="mirror-axis-field" hidden>
+              Mirror
+              <select id="mirror-axis">
+                <option value="vertical" selected>Vertical — left ↔ right</option>
+                <option value="horizontal">Horizontal — top ↔ bottom</option>
+              </select>
+            </label>
+            <p class="hint" id="mirror-hint" hidden>
+              Strokes are echoed across the line. Lines, rectangles, ovals and
+              polygons stay on the side they start from.
+            </p>
+          </section>
+
+          <section>
             <h2>Color</h2>
             <div class="swatch-row">
               <div class="current-swatch" id="current-swatch"></div>

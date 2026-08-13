@@ -85,6 +85,24 @@ export class Editor {
     return this.page.locator(`.tool[data-tool="${tool}"]`).click();
   }
 
+  /** Mirror editing is a modifier, so this toggles rather than selects. */
+  toggleMirror(): Promise<void> {
+    return this.page.click('#mirror-tool');
+  }
+
+  /** Switches mirroring on if it isn't already, then picks its axis. */
+  async setMirrorAxis(axis: 'vertical' | 'horizontal'): Promise<void> {
+    if (!(await this.mirrorOn())) await this.toggleMirror();
+    await this.page.selectOption('#mirror-axis', axis);
+  }
+
+  mirrorOn(): Promise<boolean> {
+    return this.page
+      .locator('#mirror-tool')
+      .getAttribute('aria-pressed')
+      .then((value) => value === 'true');
+  }
+
   /** Empties the current frame (the confirm is auto-accepted). */
   clearFrame(): Promise<void> {
     return this.page.click('#clear');

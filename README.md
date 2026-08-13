@@ -41,9 +41,17 @@ than reaching into application state.
 **Tools** — pencil, eraser, line, rectangle, oval, polygon, flood fill,
 eyedropper, select, and duplicate. Keyboard shortcuts: `B` pencil, `E` eraser,
 `L` line, `R` rectangle, `O` oval, `P` polygon, `G` fill, `I` eyedropper,
-`M` select, `D` duplicate.
+`M` select, `D` duplicate. `X` toggles mirror editing.
 
 - Pencil and eraser have independent 1×1 / 3×3 / 5×5 widths.
+- **Mirror edit** (`X`) is a modifier rather than a tool of its own, so it stays
+  on across tool changes; switching it on reveals the axis choice — vertical
+  (left ↔ right) or horizontal (top ↔ bottom) — and draws the line down the
+  middle of the canvas as an overlay. Every stroke, shape and fill is echoed onto
+  the reflected cell, and the pair undoes as one step. Line, rectangle, oval and
+  polygon stay on the side they started from: their far corner stops at the line
+  rather than crossing it, which would bury the shape under its own reflection.
+  Moving a selection, copying between frames and rotating are unaffected.
 - The **select** tool marks a rectangle with two clicks — one to start, one to
   finish, with the rectangle tracking the cursor in between — then moves it. The
   cursor turns into a hand over a live selection; drag from inside it and the
