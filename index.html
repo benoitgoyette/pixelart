@@ -122,8 +122,19 @@
             <div class="swatch-row">
               <div class="current-swatch" id="current-swatch"></div>
               <input type="color" id="color-input" value="#e5484d" />
+              <button type="button" id="save-swatch" class="icon-button" title="Save this color to your swatches">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+                <span class="sr-only">Save color</span>
+              </button>
             </div>
             <div class="palette" id="palette"></div>
+            <div class="palette custom-palette" id="custom-palette" hidden></div>
+            <p class="hint" id="swatch-hint">
+              Saved colors get their own row below. Right-click one to remove it.
+            </p>
           </section>
 
           <section id="shape-section" hidden>
@@ -139,6 +150,7 @@
                 <input type="color" id="shape-fill-color" value="#ffcd75" hidden />
               </div>
               <div class="palette fill-palette" id="shape-fill-palette" hidden></div>
+              <div class="palette custom-palette" id="shape-fill-custom-palette" hidden></div>
             </div>
           </section>
 

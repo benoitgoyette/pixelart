@@ -74,8 +74,9 @@ test('snapping to the palette keeps every colour in the palette', async ({ page 
     swatches.map((swatch) => (swatch as HTMLElement).dataset.hex!.toLowerCase()),
   );
   for (const color of corners) expect(palette).toContain(color);
-  // Pure red is not in the palette, so snapping must have moved it.
-  expect(corners).not.toContain('#ff0000');
+  // The fixture's corners are pure primaries, which the palette now carries, so
+  // snapping leaves them exactly as they came in rather than dulling them.
+  expect(corners).toEqual(['#ff0000', '#00ff00', '#0000ff', '#ffffff']);
 });
 
 test('transparency in the source survives the import', async ({ page }) => {

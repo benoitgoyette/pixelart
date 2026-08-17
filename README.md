@@ -66,6 +66,12 @@ eyedropper, select, and duplicate. Keyboard shortcuts: `B` pencil, `E` eraser,
 - Rectangle, oval, and polygon can be filled with the brush color or a separate
   custom color. Polygon interiors use an even-odd scanline fill, so concave
   outlines fill correctly.
+- The palette is a row of black, white and the full-strength primaries and
+  secondaries, then a 16-color ramp. **Save your own colors** with the `+` beside
+  the color picker: they get a row of their own below the built-in ones, are
+  offered as a shape fill too, and are kept in localStorage so they survive a
+  reload. Right-click a saved swatch to remove it. Thirty-two are kept; past that
+  the oldest makes way.
 - **Import an image** by dropping a file from your computer onto the canvas, or
   through the picker in the Image panel. It is averaged down to the grid — one
   box average per cell, alpha-weighted so cut-out edges don't pick up a dark
@@ -132,7 +138,7 @@ src/canvas.ts     PixelDoc (RGBA buffer), Renderer, PNG export
 src/tools.ts      tool definitions, brush stamping, flood fill, shape geometry
 src/import.ts     image decoding, downsampling to the grid, palette snapping
 src/library.ts    saved animations in localStorage
-src/palette.ts    default palette, color conversion, nearest-palette matching
+src/palette.ts    default palette, saved swatches, color conversion, nearest-palette matching
 src/style.css
 LICENSE           GNU General Public License v3
 ```

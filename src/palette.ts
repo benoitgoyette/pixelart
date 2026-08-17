@@ -8,8 +8,23 @@
 
 import { RGBA } from './canvas';
 
-/** A compact 16-color starter palette (Sweetie-16 style ramp). */
+/**
+ * A compact starter palette: a first row of black and white followed by the
+ * primaries and secondaries at full strength — the pure values a ramp
+ * deliberately leaves out, but which pixel art reaches for as keys, outlines
+ * and highlights — then a 16-color Sweetie-16 style ramp.
+ *
+ * Laid out eight to a row, so each group is a whole number of rows.
+ */
 export const DEFAULT_PALETTE: string[] = [
+  '#000000',
+  '#ffffff',
+  '#ff0000',
+  '#00ff00',
+  '#0000ff',
+  '#ff00ff',
+  '#ffff00',
+  '#00ffff',
   '#1a1c2c',
   '#5d275d',
   '#b13e53',
@@ -27,6 +42,58 @@ export const DEFAULT_PALETTE: string[] = [
   '#566c86',
   '#333c57',
 ];
+
+/**
+ * How many colors of their own a user may keep. Past this the oldest goes, so
+ * saving one more always works rather than failing at a limit nobody was told
+ * about — and localStorage never grows without bound.
+ */
+export const MAX_CUSTOM_SWATCHES = 32;
+
+/** A six-digit hex color, the only form the swatch store keeps. */
+export function isHexColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+}
+
+/**
+ * Reads the saved swatches out of whatever localStorage handed back. Anything
+ * unparseable, of the wrong shape, or not a color is dropped rather than thrown:
+ * a corrupted entry costs the saved colors, not the whole editor.
+ */
+export function parseSwatches(raw: string | null): string[] {
+  if (raw === null) return [];
+  try {
+    const saved: unknown = JSON.parse(raw);
+    if (!Array.isArray(saved)) return [];
+    const clean: string[] = [];
+    for (const entry of saved) {
+      if (!isHexColor(entry)) continue;
+      const hex = entry.toLowerCase();
+      if (!clean.includes(hex)) clean.push(hex);
+    }
+    return clean.slice(-MAX_CUSTOM_SWATCHES);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `swatches` with `hex` appended — the same list back when it already holds it,
+ * so a caller can tell a save from a no-op by identity. The oldest is dropped
+ * once the list is full.
+ */
+export function withSwatch(swatches: string[], hex: string): string[] {
+  const color = hex.toLowerCase();
+  if (!isHexColor(color) || swatches.includes(color)) return swatches;
+  return [...swatches, color].slice(-MAX_CUSTOM_SWATCHES);
+}
+
+/** `swatches` without `hex`, or the same list back when it wasn't there. */
+export function withoutSwatch(swatches: string[], hex: string): string[] {
+  const color = hex.toLowerCase();
+  if (!swatches.includes(color)) return swatches;
+  return swatches.filter((entry) => entry !== color);
+}
 
 export function hexToRgba(hex: string): RGBA {
   const clean = hex.replace('#', '');

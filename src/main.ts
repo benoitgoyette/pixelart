@@ -41,7 +41,16 @@ import {
   isImageFile,
   resampleToGrid,
 } from './import';
-import { DEFAULT_PALETTE, hexToRgba, rgbaToCss, rgbaToHex } from './palette';
+import {
+  DEFAULT_PALETTE,
+  MAX_CUSTOM_SWATCHES,
+  hexToRgba,
+  parseSwatches,
+  rgbaToCss,
+  rgbaToHex,
+  withSwatch,
+  withoutSwatch,
+} from './palette';
 import {
   BRUSH_SIZES,
   BrushSize,
@@ -61,6 +70,7 @@ import {
 
 const STORAGE_KEY = 'pixelart:doc';
 const SETTINGS_KEY = 'pixelart:settings';
+const SWATCHES_KEY = 'pixelart:swatches';
 const MAX_HISTORY = 100;
 
 const el = <T extends HTMLElement>(id: string): T => {
@@ -101,6 +111,9 @@ const mirrorAxisSelect = el<HTMLSelectElement>('mirror-axis');
 const mirrorAxisField = el<HTMLLabelElement>('mirror-axis-field');
 const mirrorHint = el<HTMLParagraphElement>('mirror-hint');
 const shapeFillPalette = el<HTMLDivElement>('shape-fill-palette');
+const shapeFillCustomPalette = el<HTMLDivElement>('shape-fill-custom-palette');
+const customPalette = el<HTMLDivElement>('custom-palette');
+const saveSwatchButton = el<HTMLButtonElement>('save-swatch');
 const saveDialog = el<HTMLDialogElement>('save-dialog');
 const saveName = el<HTMLInputElement>('save-name');
 const saveHint = el<HTMLParagraphElement>('save-hint');
@@ -1578,39 +1591,114 @@ function buildBrushSizes(): void {
   });
 }
 
-/** Fills a container with the shared palette; `onPick` decides what a click means. */
-function buildSwatches(container: HTMLElement, onPick: (hex: string) => void): void {
-  for (const hex of DEFAULT_PALETTE) {
+/**
+ * Fills a container with swatches; `onPick` decides what a click means. Saved
+ * colors carry the removal gesture, which the built-in palette must not: those
+ * are the app's, not the user's, and cannot be taken away.
+ */
+function buildSwatches(
+  container: HTMLElement,
+  colors: string[],
+  onPick: (hex: string) => void,
+  removable = false,
+): void {
+  container.textContent = '';
+  for (const hex of colors) {
     const swatch = document.createElement('button');
     swatch.type = 'button';
-    swatch.className = 'swatch';
+    swatch.className = removable ? 'swatch custom' : 'swatch';
     swatch.dataset.hex = hex;
     swatch.style.background = hex;
-    swatch.title = hex;
+    swatch.title = removable ? `${hex} — right-click to remove` : hex;
     swatch.addEventListener('click', () => onPick(hex));
+    if (removable) {
+      swatch.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        removeSwatch(hex);
+      });
+    }
     container.appendChild(swatch);
   }
 }
 
 function buildPalette(): void {
-  buildSwatches(paletteEl, (hex) => {
+  const pickColor = (hex: string) => {
     setColor(hexToRgba(hex));
     if (tool === 'eraser') setTool('pencil');
-  });
-
-  buildSwatches(shapeFillPalette, (hex) => {
+  };
+  const pickFill = (hex: string) => {
     shapeFillColor.value = hex;
     syncShapeFill();
-  });
+  };
+
+  buildSwatches(paletteEl, DEFAULT_PALETTE, pickColor);
+  buildSwatches(customPalette, customSwatches, pickColor, true);
+  buildSwatches(shapeFillPalette, DEFAULT_PALETTE, pickFill);
+  buildSwatches(shapeFillCustomPalette, customSwatches, pickFill, true);
+
+  // An empty row would only be a gap, so it stays away until there's a color in
+  // it. The fill copy also waits on the fill mode that reveals its palette.
+  customPalette.hidden = customSwatches.length === 0;
+  shapeFillCustomPalette.hidden = customSwatches.length === 0 || shapeFillPalette.hidden;
+  if (!shapeFillPalette.hidden) syncShapeFillSwatches();
 }
 
-/** Marks the swatch matching the current custom fill, if the palette holds one. */
+/** Marks the swatch matching the current custom fill, if a palette holds one. */
 function syncShapeFillSwatches(): void {
   const current = shapeFillColor.value.toLowerCase();
-  for (const swatch of shapeFillPalette.querySelectorAll<HTMLButtonElement>('.swatch')) {
-    swatch.classList.toggle('selected', swatch.dataset.hex?.toLowerCase() === current);
+  for (const container of [shapeFillPalette, shapeFillCustomPalette]) {
+    for (const swatch of container.querySelectorAll<HTMLButtonElement>('.swatch')) {
+      swatch.classList.toggle('selected', swatch.dataset.hex?.toLowerCase() === current);
+    }
   }
 }
+
+// --- saved swatches ----------------------------------------------------------
+
+/** The user's own colors, newest last. Loaded once at boot. */
+let customSwatches: string[] = loadSwatches();
+
+function loadSwatches(): string[] {
+  try {
+    return parseSwatches(localStorage.getItem(SWATCHES_KEY));
+  } catch {
+    return []; // storage can be barred outright; the palette still works
+  }
+}
+
+function persistSwatches(): void {
+  try {
+    localStorage.setItem(SWATCHES_KEY, JSON.stringify(customSwatches));
+  } catch {
+    /* saved colors are a convenience; ignore quota or private-mode failures */
+  }
+}
+
+/** Saves the color in the picker, unless some palette already offers it. */
+function saveSwatch(): void {
+  const hex = colorInput.value.toLowerCase();
+  if (DEFAULT_PALETTE.includes(hex) || customSwatches.includes(hex)) {
+    return status(`${hex} is already in the palette`);
+  }
+
+  const full = customSwatches.length === MAX_CUSTOM_SWATCHES;
+  customSwatches = withSwatch(customSwatches, hex);
+  persistSwatches();
+  buildPalette();
+  status(full ? `saved ${hex} — the oldest swatch made way for it` : `saved ${hex}`);
+}
+
+function removeSwatch(hex: string): void {
+  const next = withoutSwatch(customSwatches, hex);
+  if (next === customSwatches) return;
+
+  customSwatches = next;
+  persistSwatches();
+  buildPalette();
+  status(`removed ${hex}`);
+}
+
+saveSwatchButton.addEventListener('click', saveSwatch);
 
 function setColor(next: RGBA): void {
   color = next;
@@ -1663,6 +1751,7 @@ function applyShapeFill(): void {
   const custom = shapeFillSelect.value === 'custom';
   shapeFillColor.hidden = !custom;
   shapeFillPalette.hidden = !custom;
+  shapeFillCustomPalette.hidden = !custom || customSwatches.length === 0;
   if (custom) syncShapeFillSwatches();
 }
 

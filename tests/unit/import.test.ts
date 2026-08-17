@@ -153,8 +153,8 @@ describe('nearestPaletteColor', () => {
   });
 
   it('matches on lightness rather than raw channel distance', () => {
-    // Near-white must land on the palette's white, not on a pale blue-grey.
-    expect(rgbaToHex(nearestPaletteColor([250, 250, 250, 255]))).toBe('#f4f4f4');
+    // Near-white must land on a white, not on a pale blue-grey.
+    expect(rgbaToHex(nearestPaletteColor([250, 250, 250, 255]))).toBe('#ffffff');
     expect(rgbaToHex(nearestPaletteColor([10, 10, 20, 255]))).toBe('#1a1c2c');
   });
 
